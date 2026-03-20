@@ -8,7 +8,7 @@
     "dev": "bun --watch run bot.ts"
   },
   "dependencies": {
-    "@maxhub/max-bot-api": "^1.0.0",
+    "@maxhub/max-bot-api": "^0.2.2",
     "@prisma/client": "^5.22.0"
   },
   "devDependencies": {
