@@ -4,7 +4,8 @@
   "description": "MAX Messenger bot for Feldsher.Ryadom project",
   "main": "bot.ts",
   "scripts": {
-    "start": "bun run bot.ts"
+    "start": "bun run bot.ts",
+    "dev": "bun --watch run bot.ts"
   },
   "dependencies": {
     "@maxhub/max-bot-api": "^1.0.0",
