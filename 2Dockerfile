@@ -1,8 +1,12 @@
-FROM oven/bun:1
+FROM node:20-slim
+
+# Install bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
 
 WORKDIR /app
 
-# Copy package files first
+# Copy package files
 COPY package.json ./
 COPY prisma ./prisma/
 
@@ -12,17 +16,14 @@ RUN bun install
 # Generate Prisma client
 RUN bunx prisma generate
 
-# Create data directory with proper permissions
-RUN mkdir -p /app/data && chmod 777 /app/data
+# Create data directory
+RUN mkdir -p /app/data
 
 # Copy bot
 COPY bot.ts ./
-
-# Create startup script
-RUN printf '#!/bin/sh\nmkdir -p /app/data\nbunx prisma db push --skip-generate\nbun run bot.ts\n' > /app/start.sh && chmod +x /app/start.sh
 
 # Expose port
 EXPOSE 8080
 
 # Start
-CMD ["/app/start.sh"]
+CMD ["sh", "-c", "mkdir -p /app/data && bunx prisma db push --skip-generate && bun run bot.ts"]
