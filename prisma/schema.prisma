@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MaxUser {
+  id              String   @id @default(cuid())
+  maxId           String   @unique
+  username        String?
+  firstName       String?
+  lastName        String?
+  hasConsent      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  state           MaxUserState?
+  waitlistEntries MaxWaitlistEntry[]
+  feldsherApplications MaxFeldsherApplication[]
+  questions       MaxQuestion[]
+}
+
+model MaxUserState {
+  id              String   @id @default(cuid())
+  maxUserId       String   @unique
+  currentStep     String
+  flowType        String
+  data            String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
+}
+
+model MaxWaitlistEntry {
+  id              String   @id @default(cuid())
+  maxUserId       String
+  name            String
+  phone           String
+  district        String
+  createdAt       DateTime @default(now())
+
+  maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
+}
+
+model MaxFeldsherApplication {
+  id              String   @id @default(cuid())
+  maxUserId       String
+  name            String
+  phone           String
+  experience      String
+  scheduleType    String
+  resumeLink      String?
+  createdAt       DateTime @default(now())
+
+  maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
+}
+
+model MaxQuestion {
+  id              String   @id @default(cuid())
+  maxUserId       String
+  name            String
+  phone           String
+  question        String
+  isAnswered      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
+}
