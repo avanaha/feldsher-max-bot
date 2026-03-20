@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 1.3 - Webhook support for Amvera
+ * Version: 1.4 - HTTP server + Polling for Amvera
  */
 
 import { Bot } from '@maxhub/max-bot-api';
@@ -85,11 +85,7 @@ const prisma = new PrismaClient({
 const BOT_CONFIG = {
   token: process.env.MAX_BOT_TOKEN || '',
   adminId: ADMIN_ID,
-  webhookUrl: process.env.WEBHOOK_URL || 'https://feldsher-max-bot-nnp.amvera.io/webhook',
   port: parseInt(process.env.PORT || '8080'),
-  channelLink: 'https://max.ru/FeldsherRyadom',
-  supportLink: 'https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM',
-  supportPhone: '+7 (965) 843-78-18',
   districts: [
     { id: '1', name: 'Индустриальный' },
     { id: '2', name: 'Ленинский' },
@@ -487,7 +483,7 @@ bot.command('admin_logs', async (ctx) => {
     return ctx.reply('⛔ Доступ запрещён.');
   }
   securityLog('ADMIN_VIEW_LOGS', id);
-  ctx.reply(`📊 Логи бота:\n📁 Расположение: /app/data/logs/\n📄 Основной лог: bot.log\n🔒 Безопасность: security.log`);
+  ctx.reply(`📊 Логи бота:\n📁 /app/data/logs/\n📄 bot.log\n🔒 security.log`);
 });
 
 bot.command('admin_stats', async (ctx) => {
@@ -501,7 +497,7 @@ bot.command('admin_stats', async (ctx) => {
     const waitlist = await prisma.maxWaitlistEntry.count();
     const feldshers = await prisma.maxFeldsherApplication.count();
     const questions = await prisma.maxQuestion.count();
-    ctx.reply(`📊 Статистика бота:\n\n👥 Пользователей: ${users}\n📋 Заявок в листе ожидания: ${waitlist}\n👨‍⚕️ Анкет фельдшеров: ${feldshers}\n❓ Вопросов: ${questions}`);
+    ctx.reply(`📊 Статистика:\n👥 Пользователей: ${users}\n📋 Лист ожидания: ${waitlist}\n👨‍⚕️ Фельдшеры: ${feldshers}\n❓ Вопросы: ${questions}`);
   } catch (e) {
     ctx.reply('Ошибка получения статистики.');
   }
@@ -718,11 +714,6 @@ bot.on('message_created', async (ctx) => {
   }
   
   const sanitizedText = sanitizeInput(text, state.flowType === 'question' && state.currentStep === 'question' ? MAX_QUESTION_LENGTH : MAX_INPUT_LENGTH);
-  
-  if (text.length > sanitizedText.length) {
-    ctx.reply(`⚠️ Сообщение слишком длинное. Сохранено ${sanitizedText.length} символов из ${text.length}.`);
-  }
-  
   const stateData = state.data;
   
   if (state.flowType === 'waitlist') {
@@ -807,7 +798,35 @@ bot.catch((err) => {
   console.error('Bot error:', err);
 });
 
-// ============== START WITH WEBHOOK ==============
+// ============== HTTP SERVER FOR AMVERA ==============
+
+async function startHttpServer(port: number) {
+  const server = Bun.serve({
+    port: port,
+    fetch(req) {
+      const url = new URL(req.url);
+      
+      if (url.pathname === '/health' || url.pathname === '/') {
+        return new Response(JSON.stringify({ 
+          status: 'ok', 
+          bot: 'FeldsherRyadomBot for MAX',
+          time: new Date().toISOString()
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      return new Response('Not found', { status: 404 });
+    },
+  });
+  
+  log('INFO', `HTTP server started on port ${port}`);
+  console.log(`🌐 HTTP server listening on port ${port}`);
+  
+  return server;
+}
+
+// ============== START ==============
 
 async function main() {
   log('INFO', 'FeldsherRyadomBot for MAX starting...');
@@ -823,6 +842,10 @@ async function main() {
     process.exit(1);
   }
   
+  // Start HTTP server for Amvera health checks
+  await startHttpServer(BOT_CONFIG.port);
+  
+  // Set bot commands
   try {
     await bot.api.setMyCommands([
       { name: 'start', description: 'Начать работу с ботом' },
@@ -840,19 +863,14 @@ async function main() {
     console.log('⚠️ Could not set bot commands');
   }
   
-  log('INFO', `Starting webhook server on port ${BOT_CONFIG.port}`);
-  log('INFO', `Webhook URL: ${BOT_CONFIG.webhookUrl}`);
-  console.log(`🔄 Starting webhook server on port ${BOT_CONFIG.port}...`);
-  console.log(`📡 Webhook URL: ${BOT_CONFIG.webhookUrl}`);
+  // Start bot with polling
+  log('INFO', 'Starting bot with polling...');
+  console.log('🔄 Starting bot with polling...');
   
-  bot.startWebhook({
-    port: BOT_CONFIG.port,
-    webhookUrl: BOT_CONFIG.webhookUrl,
-    path: '/webhook',
-  });
+  bot.start();
   
-  log('INFO', 'Bot webhook started successfully');
-  console.log('✅ Bot webhook started successfully!');
+  log('INFO', 'Bot started successfully');
+  console.log('✅ Bot started successfully!');
 }
 
 main().catch((err) => {
@@ -860,5 +878,5 @@ main().catch((err) => {
   console.error(err);
 });
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => bot.stop());
+process.once('SIGTERM', () => bot.stop());
