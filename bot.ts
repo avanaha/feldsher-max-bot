@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 1.2 - Fixed API connection handling
+ * Version: 1.3 - Webhook support for Amvera
  */
 
 import { Bot } from '@maxhub/max-bot-api';
@@ -85,6 +85,8 @@ const prisma = new PrismaClient({
 const BOT_CONFIG = {
   token: process.env.MAX_BOT_TOKEN || '',
   adminId: ADMIN_ID,
+  webhookUrl: process.env.WEBHOOK_URL || 'https://feldsher-max-bot-nnp.amvera.io/webhook',
+  port: parseInt(process.env.PORT || '8080'),
   channelLink: 'https://max.ru/FeldsherRyadom',
   supportLink: 'https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM',
   supportPhone: '+7 (965) 843-78-18',
@@ -449,12 +451,11 @@ function getUserData(ctx: any): any {
 
 // ============== BOT HANDLERS ==============
 
-// Bot started event
 bot.on('bot_started', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
   
-  log('INFO', `User ${id} started bot`);
+  log('INFO', `User ${id} started bot (bot_started event)`);
   await getOrCreateUser(id, getUserData(ctx));
   
   if (!(await hasUserConsent(id))) {
@@ -465,7 +466,6 @@ bot.on('bot_started', async (ctx) => {
   ctx.reply(WELCOME_MESSAGE, getMainKB());
 });
 
-// Start command
 bot.command('start', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -481,18 +481,13 @@ bot.command('start', async (ctx) => {
   ctx.reply(WELCOME_MESSAGE, getMainKB());
 });
 
-// Admin commands
 bot.command('admin_logs', async (ctx) => {
   const id = getUserId(ctx);
   if (!id || !isAdmin(id)) {
     return ctx.reply('⛔ Доступ запрещён.');
   }
-  
   securityLog('ADMIN_VIEW_LOGS', id);
-  ctx.reply(`📊 Логи бота:
-📁 Расположение: /app/data/logs/
-📄 Основной лог: bot.log
-🔒 Безопасность: security.log`);
+  ctx.reply(`📊 Логи бота:\n📁 Расположение: /app/data/logs/\n📄 Основной лог: bot.log\n🔒 Безопасность: security.log`);
 });
 
 bot.command('admin_stats', async (ctx) => {
@@ -500,37 +495,25 @@ bot.command('admin_stats', async (ctx) => {
   if (!id || !isAdmin(id)) {
     return ctx.reply('⛔ Доступ запрещён.');
   }
-  
   securityLog('ADMIN_VIEW_STATS', id);
-  
   try {
     const users = await prisma.maxUser.count();
     const waitlist = await prisma.maxWaitlistEntry.count();
     const feldshers = await prisma.maxFeldsherApplication.count();
     const questions = await prisma.maxQuestion.count();
-    
-    ctx.reply(`📊 Статистика бота:
-
-👥 Пользователей: ${users}
-📋 Заявок в листе ожидания: ${waitlist}
-👨‍⚕️ Анкет фельдшеров: ${feldshers}
-❓ Вопросов: ${questions}`);
+    ctx.reply(`📊 Статистика бота:\n\n👥 Пользователей: ${users}\n📋 Заявок в листе ожидания: ${waitlist}\n👨‍⚕️ Анкет фельдшеров: ${feldshers}\n❓ Вопросов: ${questions}`);
   } catch (e) {
     ctx.reply('Ошибка получения статистики.');
   }
 });
 
-// Menu commands
 bot.command('waitlist', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
   await getOrCreateUser(id, getUserData(ctx));
-  
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
   }
-  
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_COMMAND', id);
   ctx.reply('Напишите имя:', getCancelKB());
@@ -539,26 +522,20 @@ bot.command('waitlist', async (ctx) => {
 bot.command('question', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
   await getOrCreateUser(id, getUserData(ctx));
-  
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
   }
-  
   ctx.reply('Выберите:', getQuestionKB());
 });
 
 bot.command('feldsher', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
   await getOrCreateUser(id, getUserData(ctx));
-  
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
   }
-  
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_COMMAND', id);
   ctx.reply('Как вас зовут?', getCancelKB());
@@ -567,13 +544,10 @@ bot.command('feldsher', async (ctx) => {
 bot.command('doveren', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
   await getOrCreateUser(id, getUserData(ctx));
-  
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
   }
-  
   securityLog('DOVEREN_COMMAND', id);
   ctx.reply(DOVEREN_MESSAGE);
 });
@@ -581,13 +555,10 @@ bot.command('doveren', async (ctx) => {
 bot.command('podderzhka', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
   await getOrCreateUser(id, getUserData(ctx));
-  
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
   }
-  
   securityLog('PODDERZHKA_COMMAND', id);
   ctx.reply(PODDERZHKA_MESSAGE);
 });
@@ -595,7 +566,6 @@ bot.command('podderzhka', async (ctx) => {
 bot.command('privacy', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
   await getOrCreateUser(id, getUserData(ctx));
   securityLog('PRIVACY_COMMAND', id);
   ctx.reply(PRIVACY_MESSAGE);
@@ -612,7 +582,6 @@ bot.on('callback_query', async (ctx) => {
   
   log('INFO', `Callback from user ${id}: ${data}`);
   
-  // Consent handlers
   if (data === 'consent_yes') {
     await getOrCreateUser(id, getUserData(ctx));
     await setUserConsent(id, true);
@@ -642,13 +611,11 @@ bot.on('callback_query', async (ctx) => {
     return;
   }
   
-  // Check consent for other actions
   if (!(await hasUserConsent(id))) {
     ctx.reply(CONSENT_MESSAGE, getConsentKB());
     return;
   }
   
-  // Action handlers
   if (data === 'action_waitlist') {
     await setUserState(id, 'waitlist', 'name', {});
     securityLog('ACTION_STARTED', id, { action: 'waitlist' });
@@ -685,7 +652,6 @@ bot.on('callback_query', async (ctx) => {
     return;
   }
   
-  // District selection
   if (data.startsWith('district_')) {
     const districtId = data.replace('district_', '');
     const state = await getUserState(id);
@@ -714,7 +680,6 @@ bot.on('callback_query', async (ctx) => {
     return;
   }
   
-  // Schedule selection
   if (data.startsWith('schedule_')) {
     const scheduleId = data.replace('schedule_', '');
     const state = await getUserState(id);
@@ -760,7 +725,6 @@ bot.on('message_created', async (ctx) => {
   
   const stateData = state.data;
   
-  // Waitlist flow
   if (state.flowType === 'waitlist') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
@@ -777,7 +741,6 @@ bot.on('message_created', async (ctx) => {
     return;
   }
   
-  // Feldsher flow
   if (state.flowType === 'feldsher') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
@@ -810,7 +773,6 @@ bot.on('message_created', async (ctx) => {
     return;
   }
   
-  // Question flow
   if (state.flowType === 'question') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
@@ -845,7 +807,7 @@ bot.catch((err) => {
   console.error('Bot error:', err);
 });
 
-// ============== START ==============
+// ============== START WITH WEBHOOK ==============
 
 async function main() {
   log('INFO', 'FeldsherRyadomBot for MAX starting...');
@@ -861,7 +823,6 @@ async function main() {
     process.exit(1);
   }
   
-  // Set bot commands (non-blocking, with error handling)
   try {
     await bot.api.setMyCommands([
       { name: 'start', description: 'Начать работу с ботом' },
@@ -875,17 +836,23 @@ async function main() {
     log('INFO', 'Bot commands set successfully');
     console.log('✅ Bot commands set');
   } catch (error) {
-    log('WARN', 'Could not set bot commands (will retry later)', error);
-    console.log('⚠️ Could not set bot commands, continuing...');
+    log('WARN', 'Could not set bot commands', error);
+    console.log('⚠️ Could not set bot commands');
   }
   
-  log('INFO', 'Starting bot...');
-  console.log('🔄 Starting bot...');
+  log('INFO', `Starting webhook server on port ${BOT_CONFIG.port}`);
+  log('INFO', `Webhook URL: ${BOT_CONFIG.webhookUrl}`);
+  console.log(`🔄 Starting webhook server on port ${BOT_CONFIG.port}...`);
+  console.log(`📡 Webhook URL: ${BOT_CONFIG.webhookUrl}`);
   
-  bot.start();
+  bot.startWebhook({
+    port: BOT_CONFIG.port,
+    webhookUrl: BOT_CONFIG.webhookUrl,
+    path: '/webhook',
+  });
   
-  log('INFO', 'Bot started successfully');
-  console.log('✅ Bot started successfully!');
+  log('INFO', 'Bot webhook started successfully');
+  console.log('✅ Bot webhook started successfully!');
 }
 
 main().catch((err) => {
