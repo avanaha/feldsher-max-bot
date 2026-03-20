@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 1.0
+ * Version: 1.1 - Updated for MAX Bot API
  */
 
-import { Bot, Context, Markup } from '@maxhub/max-bot-api';
+import { Bot } from '@maxhub/max-bot-api';
 import { PrismaClient } from '@prisma/client';
 import { mkdirSync, existsSync, appendFileSync } from 'fs';
 import { join } from 'path';
@@ -344,64 +344,146 @@ https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM
 
 // ============== KEYBOARDS ==============
 
-const getConsentKB = () => ({
-  inline_keyboard: [
-    [{ text: '✅ СОГЛАСЕН(-НА)', callback_data: 'consent_yes' }],
-    [{ text: '❌ НЕ СОГЛАСЕН(-НА)', callback_data: 'consent_no' }]
-  ]
-});
+function getConsentKB() {
+  return {
+    attachments: [{
+      type: 'inline_keyboard',
+      payload: {
+        buttons: [
+          [{ type: 'callback', text: '✅ СОГЛАСЕН(-НА)', callback_data: 'consent_yes' }],
+          [{ type: 'callback', text: '❌ НЕ СОГЛАСЕН(-НА)', callback_data: 'consent_no' }]
+        ]
+      }
+    }]
+  };
+}
 
-const getMainKB = () => ({
-  inline_keyboard: [
-    [{ text: '📋 Пациенту – в лист ожидания', callback_data: 'action_waitlist' }],
-    [{ text: '❓ Задать вопрос', callback_data: 'action_question' }],
-    [{ text: '👨‍⚕️ Фельдшеру – отправить резюме', callback_data: 'action_feldsher' }],
-    [{ text: '❤️ Поддержать проект', callback_data: 'action_podderzhka' }],
-    [{ text: '📄 Текст доверенности', callback_data: 'action_doveren' }]
-  ]
-});
+function getMainKB() {
+  return {
+    attachments: [{
+      type: 'inline_keyboard',
+      payload: {
+        buttons: [
+          [{ type: 'callback', text: '📋 Пациенту – в лист ожидания', callback_data: 'action_waitlist' }],
+          [{ type: 'callback', text: '❓ Задать вопрос', callback_data: 'action_question' }],
+          [{ type: 'callback', text: '👨‍⚕️ Фельдшеру – отправить резюме', callback_data: 'action_feldsher' }],
+          [{ type: 'callback', text: '❤️ Поддержать проект', callback_data: 'action_podderzhka' }],
+          [{ type: 'callback', text: '📄 Текст доверенности', callback_data: 'action_doveren' }]
+        ]
+      }
+    }]
+  };
+}
 
-const getQuestionKB = () => ({
-  inline_keyboard: [
-    [{ text: '❓ Задать вопрос', callback_data: 'question_start' }],
-    [{ text: '🗑️ Отозвать согласие', callback_data: 'revoke_consent' }]
-  ]
-});
+function getQuestionKB() {
+  return {
+    attachments: [{
+      type: 'inline_keyboard',
+      payload: {
+        buttons: [
+          [{ type: 'callback', text: '❓ Задать вопрос', callback_data: 'question_start' }],
+          [{ type: 'callback', text: '🗑️ Отозвать согласие', callback_data: 'revoke_consent' }]
+        ]
+      }
+    }]
+  };
+}
 
-const getDistrictKB = () => ({
-  inline_keyboard: [
-    [{ text: '1. Индустриальный', callback_data: 'district_1' }],
-    [{ text: '2. Ленинский', callback_data: 'district_2' }],
-    [{ text: '3. Октябрьский', callback_data: 'district_3' }],
-    [{ text: '4. Первомайский', callback_data: 'district_4' }],
-    [{ text: '5. Устиновский', callback_data: 'district_5' }],
-    [{ text: '❌ Отменить', callback_data: 'cancel' }]
-  ]
-});
+function getDistrictKB() {
+  const buttons = BOT_CONFIG.districts.map(d => 
+    [{ type: 'callback', text: `${d.id}. ${d.name}`, callback_data: `district_${d.id}` }]
+  );
+  buttons.push([{ type: 'callback', text: '❌ Отменить', callback_data: 'cancel' }]);
+  
+  return {
+    attachments: [{
+      type: 'inline_keyboard',
+      payload: { buttons }
+    }]
+  };
+}
 
-const getScheduleKB = () => ({
-  inline_keyboard: [
-    [{ text: 'Вариант 1 (16 смен)', callback_data: 'schedule_16' }],
-    [{ text: 'Вариант 2 (12 смен)', callback_data: 'schedule_12' }],
-    [{ text: '❌ Отменить', callback_data: 'cancel' }]
-  ]
-});
+function getScheduleKB() {
+  return {
+    attachments: [{
+      type: 'inline_keyboard',
+      payload: {
+        buttons: [
+          [{ type: 'callback', text: 'Вариант 1 (16 смен)', callback_data: 'schedule_16' }],
+          [{ type: 'callback', text: 'Вариант 2 (12 смен)', callback_data: 'schedule_12' }],
+          [{ type: 'callback', text: '❌ Отменить', callback_data: 'cancel' }]
+        ]
+      }
+    }]
+  };
+}
 
-const getCancelKB = () => ({
-  keyboard: [[{ text: '❌ Отменить' }]],
-  resize_keyboard: true
-});
+function getCancelKB() {
+  return {
+    attachments: [{
+      type: 'keyboard',
+      payload: {
+        buttons: [[{ type: 'text', text: '❌ Отменить' }]]
+      }
+    }]
+  };
+}
 
-const noKB = () => ({ remove_keyboard: true });
+// ============== HELPER TO GET USER ID ==============
+
+function getUserId(ctx: any): number | null {
+  // MAX Bot API uses different property paths
+  const sender = ctx.sender || ctx.from || ctx.message?.sender;
+  if (sender?.user_id) return sender.user_id;
+  if (sender?.id) return sender.id;
+  return null;
+}
+
+function getUserData(ctx: any): any {
+  const sender = ctx.sender || ctx.from || ctx.message?.sender;
+  return {
+    username: sender?.username || '',
+    firstName: sender?.first_name || sender?.name || '',
+    lastName: sender?.last_name || '',
+  };
+}
 
 // ============== BOT HANDLERS ==============
 
-bot.command('start', async (ctx) => {
-  const id = ctx.from?.user_id;
+// Set bot commands
+bot.api.setMyCommands([
+  { name: 'start', description: 'Начать работу с ботом' },
+  { name: 'waitlist', description: 'Записаться в лист ожидания' },
+  { name: 'question', description: 'Задать вопрос' },
+  { name: 'feldsher', description: 'Отправить резюме фельдшера' },
+  { name: 'doveren', description: 'Текст доверенности' },
+  { name: 'podderzhka', description: 'Поддержать проект' },
+  { name: 'privacy', description: 'Политика конфиденциальности' },
+]);
+
+// Bot started event (when user first opens bot)
+bot.on('bot_started', async (ctx) => {
+  const id = getUserId(ctx);
   if (!id) return;
   
   log('INFO', `User ${id} started bot`);
-  await getOrCreateUser(id, ctx.from);
+  await getOrCreateUser(id, getUserData(ctx));
+  
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKB());
+  }
+  
+  await clearUserState(id);
+  ctx.reply(WELCOME_MESSAGE, getMainKB());
+});
+
+// Start command
+bot.command('start', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  
+  log('INFO', `User ${id} used /start command`);
+  await getOrCreateUser(id, getUserData(ctx));
   
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
@@ -413,7 +495,7 @@ bot.command('start', async (ctx) => {
 
 // Admin commands
 bot.command('admin_logs', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id || !isAdmin(id)) {
     return ctx.reply('⛔ Доступ запрещён.');
   }
@@ -426,7 +508,7 @@ bot.command('admin_logs', async (ctx) => {
 });
 
 bot.command('admin_stats', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id || !isAdmin(id)) {
     return ctx.reply('⛔ Доступ запрещён.');
   }
@@ -452,10 +534,10 @@ bot.command('admin_stats', async (ctx) => {
 
 // Menu commands
 bot.command('waitlist', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id) return;
   
-  await getOrCreateUser(id, ctx.from);
+  await getOrCreateUser(id, getUserData(ctx));
   
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
@@ -467,10 +549,10 @@ bot.command('waitlist', async (ctx) => {
 });
 
 bot.command('question', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id) return;
   
-  await getOrCreateUser(id, ctx.from);
+  await getOrCreateUser(id, getUserData(ctx));
   
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
@@ -480,10 +562,10 @@ bot.command('question', async (ctx) => {
 });
 
 bot.command('feldsher', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id) return;
   
-  await getOrCreateUser(id, ctx.from);
+  await getOrCreateUser(id, getUserData(ctx));
   
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
@@ -495,10 +577,10 @@ bot.command('feldsher', async (ctx) => {
 });
 
 bot.command('doveren', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id) return;
   
-  await getOrCreateUser(id, ctx.from);
+  await getOrCreateUser(id, getUserData(ctx));
   
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
@@ -509,10 +591,10 @@ bot.command('doveren', async (ctx) => {
 });
 
 bot.command('podderzhka', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id) return;
   
-  await getOrCreateUser(id, ctx.from);
+  await getOrCreateUser(id, getUserData(ctx));
   
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, getConsentKB());
@@ -523,10 +605,10 @@ bot.command('podderzhka', async (ctx) => {
 });
 
 bot.command('privacy', async (ctx) => {
-  const id = ctx.from?.user_id;
+  const id = getUserId(ctx);
   if (!id) return;
   
-  await getOrCreateUser(id, ctx.from);
+  await getOrCreateUser(id, getUserData(ctx));
   securityLog('PRIVACY_COMMAND', id);
   ctx.reply(PRIVACY_MESSAGE);
 });
@@ -534,12 +616,15 @@ bot.command('privacy', async (ctx) => {
 // ============== CALLBACK HANDLERS ==============
 
 bot.on('callback_query', async (ctx) => {
-  const id = ctx.from?.user_id;
-  const data = ctx.callbackQuery?.data;
+  const id = getUserId(ctx);
+  const callback = ctx.callbackQuery;
+  const data = callback?.payload?.callback_data || callback?.data;
+  
   if (!id || !data) return;
   
   // Consent handlers
   if (data === 'consent_yes') {
+    await getOrCreateUser(id, getUserData(ctx));
     await setUserConsent(id, true);
     securityLog('CONSENT_GRANTED', id);
     ctx.editMessageText('✅ Спасибо! Отправьте /start');
@@ -562,7 +647,7 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'cancel') {
     await clearUserState(id);
     securityLog('FLOW_CANCELLED', id);
-    ctx.reply('❌ Отменено', noKB());
+    ctx.reply('❌ Отменено');
     ctx.reply(WELCOME_MESSAGE, getMainKB());
     return;
   }
@@ -630,7 +715,7 @@ bot.on('callback_query', async (ctx) => {
       await saveWaitlistEntry(id, stateData);
       await sendNotification('waitlist', stateData);
       securityLog('WAITLIST_ENTRY_SAVED', id, { district: district.name });
-      ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Добавлены в лист ожидания.`, noKB());
+      ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Добавлены в лист ожидания.`);
     } catch (e) {
       log('ERROR', `Failed to save waitlist entry for user ${id}`, e);
       ctx.reply('Ошибка сохранения.');
@@ -656,16 +741,16 @@ bot.on('callback_query', async (ctx) => {
 
 // ============== TEXT HANDLER ==============
 
-bot.on('message', async (ctx) => {
-  const id = ctx.from?.user_id;
-  const text = ctx.message?.text;
+bot.on('message_created', async (ctx) => {
+  const id = getUserId(ctx);
+  const text = ctx.message?.body?.text || ctx.message?.text;
   
   if (!id || !text) return;
   
   if (text === '❌ Отменить') {
     await clearUserState(id);
     securityLog('FLOW_CANCELLED', id);
-    ctx.reply('❌ Отменено', noKB());
+    ctx.reply('❌ Отменено');
     ctx.reply(WELCOME_MESSAGE, getMainKB());
     return;
   }
@@ -723,7 +808,7 @@ bot.on('message', async (ctx) => {
         await saveFeldsherApplication(id, stateData);
         await sendNotification('feldsher', stateData);
         securityLog('FELDSHER_APPLICATION_SAVED', id);
-        ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}!`, noKB());
+        ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}!`);
       } catch (e) {
         log('ERROR', `Failed to save feldsher application for user ${id}`, e);
         ctx.reply('Ошибка.');
@@ -752,7 +837,7 @@ bot.on('message', async (ctx) => {
         await saveQuestion(id, stateData);
         await sendNotification('question', stateData);
         securityLog('QUESTION_SAVED', id);
-        ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}!`, noKB());
+        ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}!`);
       } catch (e) {
         log('ERROR', `Failed to save question for user ${id}`, e);
         ctx.reply('Ошибка.');
@@ -787,7 +872,7 @@ async function main() {
   log('INFO', 'Starting bot...');
   console.log('🔄 Starting bot...');
   
-  bot.launch();
+  bot.start();
   
   log('INFO', 'Bot started successfully');
   console.log('✅ Bot started successfully!');
