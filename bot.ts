@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 1.1 - Updated for MAX Bot API
+ * Version: 1.2 - Fixed API connection handling
  */
 
 import { Bot } from '@maxhub/max-bot-api';
@@ -432,7 +432,6 @@ function getCancelKB() {
 // ============== HELPER TO GET USER ID ==============
 
 function getUserId(ctx: any): number | null {
-  // MAX Bot API uses different property paths
   const sender = ctx.sender || ctx.from || ctx.message?.sender;
   if (sender?.user_id) return sender.user_id;
   if (sender?.id) return sender.id;
@@ -450,18 +449,7 @@ function getUserData(ctx: any): any {
 
 // ============== BOT HANDLERS ==============
 
-// Set bot commands
-bot.api.setMyCommands([
-  { name: 'start', description: 'Начать работу с ботом' },
-  { name: 'waitlist', description: 'Записаться в лист ожидания' },
-  { name: 'question', description: 'Задать вопрос' },
-  { name: 'feldsher', description: 'Отправить резюме фельдшера' },
-  { name: 'doveren', description: 'Текст доверенности' },
-  { name: 'podderzhka', description: 'Поддержать проект' },
-  { name: 'privacy', description: 'Политика конфиденциальности' },
-]);
-
-// Bot started event (when user first opens bot)
+// Bot started event
 bot.on('bot_started', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -622,6 +610,8 @@ bot.on('callback_query', async (ctx) => {
   
   if (!id || !data) return;
   
+  log('INFO', `Callback from user ${id}: ${data}`);
+  
   // Consent handlers
   if (data === 'consent_yes') {
     await getOrCreateUser(id, getUserData(ctx));
@@ -747,6 +737,8 @@ bot.on('message_created', async (ctx) => {
   
   if (!id || !text) return;
   
+  log('INFO', `Message from user ${id}: ${text.substring(0, 50)}...`);
+  
   if (text === '❌ Отменить') {
     await clearUserState(id);
     securityLog('FLOW_CANCELLED', id);
@@ -867,6 +859,24 @@ async function main() {
     log('ERROR', 'Database connection failed', error);
     console.error('❌ Database connection failed:', error);
     process.exit(1);
+  }
+  
+  // Set bot commands (non-blocking, with error handling)
+  try {
+    await bot.api.setMyCommands([
+      { name: 'start', description: 'Начать работу с ботом' },
+      { name: 'waitlist', description: 'Записаться в лист ожидания' },
+      { name: 'question', description: 'Задать вопрос' },
+      { name: 'feldsher', description: 'Отправить резюме фельдшера' },
+      { name: 'doveren', description: 'Текст доверенности' },
+      { name: 'podderzhka', description: 'Поддержать проект' },
+      { name: 'privacy', description: 'Политика конфиденциальности' },
+    ]);
+    log('INFO', 'Bot commands set successfully');
+    console.log('✅ Bot commands set');
+  } catch (error) {
+    log('WARN', 'Could not set bot commands (will retry later)', error);
+    console.log('⚠️ Could not set bot commands, continuing...');
   }
   
   log('INFO', 'Starting bot...');
