@@ -1,3 +1,5 @@
+я тебе что сказала: я тебе сказала тестовую версию файла забудь и сотри, а оставь версию файла bot.ts такую:
+
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
@@ -708,3 +710,5 @@ main().catch((err) => {
 
 process.once('SIGINT', () => bot.stop());
 process.once('SIGTERM', () => bot.stop());
+
+выполняй
