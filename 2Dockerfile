@@ -19,14 +19,7 @@ RUN mkdir -p /app/data && chmod 777 /app/data
 COPY bot.ts ./
 
 # Create startup script
-RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'echo "Creating data directory..."' >> /app/start.sh && \
-    echo 'mkdir -p /app/data' >> /app/start.sh && \
-    echo 'echo "Initializing database..."' >> /app/start.sh && \
-    echo 'bunx prisma db push --skip-generate' >> /app/start.sh && \
-    echo 'echo "Starting bot (webhook mode)..."' >> /app/start.sh && \
-    echo 'bun run bot.ts' >> /app/start.sh && \
-    chmod +x /app/start.sh
+RUN printf '#!/bin/sh\nmkdir -p /app/data\nbunx prisma db push --skip-generate\nbun run bot.ts\n' > /app/start.sh && chmod +x /app/start.sh
 
 # Expose port
 EXPOSE 8080
