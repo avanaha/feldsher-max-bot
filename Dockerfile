@@ -1,29 +1,32 @@
-FROM node:20-alpine
-
-# Install bun
-RUN apk add --no-cache curl && \
-    curl -fsSL https://bun.sh/install | sh && \
-    apk del curl
-
-ENV PATH="/root/.bun/bin:$PATH"
+FROM oven/bun:1
 
 WORKDIR /app
 
-# Copy files
+# Copy package files first
 COPY package.json ./
 COPY prisma ./prisma/
 
-# Install and generate
-RUN bun install && bunx prisma generate
+# Install dependencies
+RUN bun install
 
-# Create data dir
-RUN mkdir -p /app/data
+# Generate Prisma client
+RUN bunx prisma generate
+
+# Create data directory with proper permissions
+RUN mkdir -p /app/data && chmod 777 /app/data
 
 # Copy bot
 COPY bot.ts ./
 
-# Expose port
-EXPOSE 8080
+# Create startup script
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'echo "Creating data directory..."' >> /app/start.sh && \
+    echo 'mkdir -p /app/data' >> /app/start.sh && \
+    echo 'echo "Initializing database..."' >> /app/start.sh && \
+    echo 'bunx prisma db push --skip-generate' >> /app/start.sh && \
+    echo 'echo "Starting bot..."' >> /app/start.sh && \
+    echo 'bun run bot.ts' >> /app/start.sh && \
+    chmod +x /app/start.sh
 
-# Start command
-CMD ["sh", "-c", "mkdir -p /app/data && bunx prisma db push --skip-generate && bun bot.ts"]
+# Start
+CMD ["/app/start.sh"]
