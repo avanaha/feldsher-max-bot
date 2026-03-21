@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 4.0 - Button-only navigation (no text input for choices)
+ * Version: 5.0 - Button-only navigation (fixed keyboard API)
  * Repository: https://github.com/avanaha/feldsher-max-bot
  */
 
@@ -428,124 +428,80 @@ const SCHEDULE_MESSAGE = `📅 ВЫБОР ГРАФИКА
 
 // ============== KEYBOARDS ==============
 
-// Клавиатура согласия
-function getConsentKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('✅ Согласен (-на)', 'consent_yes')],
-    [Keyboard.button.callback('❌ Не согласен (-на)', 'consent_no')],
-  ]);
-}
+const ConsentKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('✅ Согласен (-на)', 'consent_yes')],
+  [Keyboard.button.callback('❌ Не согласен (-на)', 'consent_no')],
+]);
 
-// Главное меню
-function getMainKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('📋 Пациентам', 'menu_patient')],
-    [Keyboard.button.callback('❓ У меня есть вопрос', 'menu_question')],
-    [Keyboard.button.callback('👨‍⚕️ Фельдшеру – отправить резюме', 'menu_feldsher')],
-    [Keyboard.button.callback('📄 Текст доверенности', 'menu_doveren')],
-    [Keyboard.button.callback('❤️ Поддержать проект', 'menu_podderzhka')],
-    [Keyboard.button.callback('🗑️ Отозвать согласие', 'menu_revoke')],
-    [Keyboard.button.callback('🔐 Свод правил', 'menu_privacy')],
-    [Keyboard.button.callback('📢 Наши каналы', 'menu_channels')],
-  ]);
-}
+const MainKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('📋 Пациентам', 'menu_patient')],
+  [Keyboard.button.callback('❓ У меня есть вопрос', 'menu_question')],
+  [Keyboard.button.callback('👨‍⚕️ Фельдшеру – отправить резюме', 'menu_feldsher')],
+  [Keyboard.button.callback('📄 Текст доверенности', 'menu_doveren')],
+  [Keyboard.button.callback('❤️ Поддержать проект', 'menu_podderzhka')],
+  [Keyboard.button.callback('🗑️ Отозвать согласие', 'menu_revoke')],
+  [Keyboard.button.callback('🔐 Свод правил', 'menu_privacy')],
+  [Keyboard.button.callback('📢 Наши каналы', 'menu_channels')],
+]);
 
-// Меню пациента
-function getPatientKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('📋 Лист ожидания', 'patient_waitlist')],
-    [Keyboard.button.callback('💰 Оплатить предзаказ', 'patient_order')],
-    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-  ]);
-}
+const PatientKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('📋 Лист ожидания', 'patient_waitlist')],
+  [Keyboard.button.callback('💰 Оплатить предзаказ', 'patient_order')],
+  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+]);
 
-// Меню вопросов
-function getQuestionKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('❓ Задать вопрос', 'question_ask')],
-    [Keyboard.button.callback('🗑️ Отозвать согласие', 'menu_revoke')],
-    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-  ]);
-}
+const QuestionKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('❓ Задать вопрос', 'question_ask')],
+  [Keyboard.button.callback('🗑️ Отозвать согласие', 'menu_revoke')],
+  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+]);
 
-// Клавиатура отмены
-function getCancelKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
-  ]);
-}
+const CancelKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+]);
 
-// Клавиатура отмены + главное меню
-function getCancelMenuKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
-    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-  ]);
-}
+const DistrictKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('1. Индустриальный', 'district_1')],
+  [Keyboard.button.callback('2. Ленинский', 'district_2')],
+  [Keyboard.button.callback('3. Октябрьский', 'district_3')],
+  [Keyboard.button.callback('4. Первомайский', 'district_4')],
+  [Keyboard.button.callback('5. Устиновский', 'district_5')],
+  [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+]);
 
-// Выбор района
-function getDistrictKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('1. Индустриальный', 'district_1')],
-    [Keyboard.button.callback('2. Ленинский', 'district_2')],
-    [Keyboard.button.callback('3. Октябрьский', 'district_3')],
-    [Keyboard.button.callback('4. Первомайский', 'district_4')],
-    [Keyboard.button.callback('5. Устиновский', 'district_5')],
-    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
-  ]);
-}
+const ScheduleKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('Вариант 1 (16 смен)', 'schedule_1')],
+  [Keyboard.button.callback('Вариант 2 (12 смен)', 'schedule_2')],
+  [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+]);
 
-// Выбор графика
-function getScheduleKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('Вариант 1 (16 смен)', 'schedule_1')],
-    [Keyboard.button.callback('Вариант 2 (12 смен)', 'schedule_2')],
-    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
-  ]);
-}
+const RevokeKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('✅ Да, удалить мои данные', 'revoke_yes')],
+  [Keyboard.button.callback('❌ Нет, я передумал', 'revoke_no')],
+]);
 
-// Подтверждение отзыва
-function getRevokeKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('✅ Да, удалить мои данные', 'revoke_yes')],
-    [Keyboard.button.callback('❌ Нет, я передумал', 'revoke_no')],
-  ]);
-}
+const BackKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+]);
 
-// Клавиатура возврата в меню
-function getBackKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-  ]);
-}
+const ChannelsKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.link('🟪 MAX (пациентам)', BOT_CONFIG.patientChannelLink)],
+  [Keyboard.button.link('🟪 MAX (фельдшерам)', BOT_CONFIG.feldsherChannelLink)],
+  [Keyboard.button.link('🔵 VK (пациентам)', BOT_CONFIG.vkPatientLink)],
+  [Keyboard.button.link('🔵 VK (фельдшерам)', BOT_CONFIG.vkFeldsherLink)],
+  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+]);
 
-// Клавиатура с каналами
-function getChannelsKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.link('🟪 MAX (пациентам)', BOT_CONFIG.patientChannelLink)],
-    [Keyboard.button.link('🟪 MAX (фельдшерам)', BOT_CONFIG.feldsherChannelLink)],
-    [Keyboard.button.link('🔵 VK (пациентам)', BOT_CONFIG.vkPatientLink)],
-    [Keyboard.button.link('🔵 VK (фельдшерам)', BOT_CONFIG.vkFeldsherLink)],
-    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-  ]);
-}
+const PodderzhkaKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.link('💰 Планета.ру', BOT_CONFIG.planetaLink)],
+  [Keyboard.button.link('💳 Сбер', BOT_CONFIG.sberLink)],
+  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+]);
 
-// Клавиатура поддержки
-function getPodderzhkaKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.link('💰 Планета.ру', BOT_CONFIG.planetaLink)],
-    [Keyboard.button.link('💳 Сбер', BOT_CONFIG.sberLink)],
-    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-  ]);
-}
-
-// Клавиатура с политикой
-function getPrivacyKeyboard() {
-  return Keyboard.inline([
-    [Keyboard.button.link('📄 Политика конфиденциальности', BOT_CONFIG.privacyLink)],
-    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-  ]);
-}
+const PrivacyKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.link('📄 Политика конфиденциальности', BOT_CONFIG.privacyLink)],
+  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+]);
 
 // ============== HELPER ==============
 
@@ -565,201 +521,6 @@ function getUserData(ctx: any): any {
   };
 }
 
-// ============== CALLBACK HANDLERS ==============
-
-// Согласие
-bot.on('callback_query', async (ctx: any) => {
-  const id = getUserId(ctx);
-  const callbackId = ctx.callback_query?.callback_id || ctx.callbackId;
-  const payload = ctx.callback_query?.payload || ctx.payload;
-
-  if (!id || !payload) return;
-
-  log('INFO', `Callback from user ${id}: ${payload}`);
-
-  try {
-    // ========== CONSENT ==========
-    if (payload === 'consent_yes') {
-      await getOrCreateUser(id, getUserData(ctx));
-      await setUserConsent(id, true);
-      securityLog('CONSENT_GRANTED', id);
-      await ctx.reply('✅ Спасибо за согласие! Теперь вы можете пользоваться ботом.', getMainKeyboard());
-      return;
-    }
-
-    if (payload === 'consent_no') {
-      securityLog('CONSENT_DENIED', id);
-      await ctx.reply('❌ Без согласия функционал бота недоступен. Напишите /start чтобы попробовать снова.');
-      return;
-    }
-
-    // Проверка согласия для остальных действий
-    if (!(await hasUserConsent(id))) {
-      await ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
-      return;
-    }
-
-    // ========== MAIN MENU ==========
-    if (payload === 'main_menu') {
-      await clearUserState(id);
-      await ctx.reply(WELCOME_MESSAGE, getMainKeyboard());
-      return;
-    }
-
-    // ========== CANCEL ==========
-    if (payload === 'cancel_flow') {
-      await clearUserState(id);
-      await ctx.reply('❌ Отменено.', getMainKeyboard());
-      return;
-    }
-
-    // ========== PATIENT MENU ==========
-    if (payload === 'menu_patient') {
-      await clearUserState(id);
-      await ctx.reply(PATIENT_MENU_MESSAGE, getPatientKeyboard());
-      return;
-    }
-
-    if (payload === 'patient_waitlist') {
-      await setUserState(id, 'waitlist', 'name', {});
-      securityLog('WAITLIST_START', id);
-      await ctx.reply('Напишите ваше имя:', getCancelKeyboard());
-      return;
-    }
-
-    if (payload === 'patient_order') {
-      await ctx.reply(ORDER_MESSAGE, getBackKeyboard());
-      return;
-    }
-
-    // ========== QUESTION MENU ==========
-    if (payload === 'menu_question') {
-      await clearUserState(id);
-      await ctx.reply(QUESTION_MENU_MESSAGE, getQuestionKeyboard());
-      return;
-    }
-
-    if (payload === 'question_ask') {
-      await setUserState(id, 'question', 'name', {});
-      securityLog('QUESTION_START', id);
-      await ctx.reply('Напишите ваше имя:', getCancelKeyboard());
-      return;
-    }
-
-    // ========== FELDSHER ==========
-    if (payload === 'menu_feldsher') {
-      await setUserState(id, 'feldsher', 'name', {});
-      securityLog('FELDSHER_START', id);
-      await ctx.reply('Как вас зовут?', getCancelKeyboard());
-      return;
-    }
-
-    // ========== DISTRICT SELECTION ==========
-    if (payload.startsWith('district_')) {
-      const districtId = payload.replace('district_', '');
-      const district = BOT_CONFIG.districts.find(d => d.id === districtId);
-
-      if (!district) {
-        await ctx.reply('Ошибка выбора района. Попробуйте снова.', getDistrictKeyboard());
-        return;
-      }
-
-      const state = await getUserState(id);
-      if (!state || state.flowType !== 'waitlist') {
-        await ctx.reply('Ошибка. Начните заново.', getMainKeyboard());
-        return;
-      }
-
-      const stateData = state.data;
-      stateData.district = district.name;
-
-      try {
-        await saveWaitlistEntry(id, stateData);
-        await sendNotification('waitlist', stateData);
-        securityLog('WAITLIST_SAVED', id, { district: district.name });
-        await clearUserState(id);
-        await ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Вы добавлены в лист ожидания.
-
-Как только откроем фельдшерский кабинет, мы свяжемся с вами.`, getBackKeyboard());
-      } catch (e) {
-        log('ERROR', 'Failed to save waitlist', e);
-        await ctx.reply('Ошибка сохранения. Попробуйте позже.', getMainKeyboard());
-      }
-      return;
-    }
-
-    // ========== SCHEDULE SELECTION ==========
-    if (payload.startsWith('schedule_')) {
-      const scheduleId = payload.replace('schedule_', '');
-      const scheduleName = BOT_CONFIG.scheduleOptions[scheduleId as keyof typeof BOT_CONFIG.scheduleOptions];
-
-      if (!scheduleName) {
-        await ctx.reply('Ошибка выбора графика. Попробуйте снова.', getScheduleKeyboard());
-        return;
-      }
-
-      const state = await getUserState(id);
-      if (!state || state.flowType !== 'feldsher') {
-        await ctx.reply('Ошибка. Начните заново.', getMainKeyboard());
-        return;
-      }
-
-      const stateData = state.data;
-      stateData.scheduleType = scheduleName;
-      await setUserState(id, 'feldsher', 'resume', stateData);
-
-      await ctx.reply('Ссылка на резюме (Google Docs, hh.ru) или краткое описание опыта. Если нет резюме, напишите "нет":', getCancelKeyboard());
-      return;
-    }
-
-    // ========== REVOKE ==========
-    if (payload === 'menu_revoke') {
-      await setUserState(id, 'revoke', 'confirm', {});
-      await ctx.reply(REVOKE_MESSAGE, getRevokeKeyboard());
-      return;
-    }
-
-    if (payload === 'revoke_yes') {
-      await deleteAllUserData(id);
-      securityLog('DATA_DELETED', id);
-      log('INFO', `User ${id} revoked consent and deleted data`);
-      await ctx.reply('🗑️ Ваши данные удалены. Для использования бота напишите /start и примите согласие заново.');
-      return;
-    }
-
-    if (payload === 'revoke_no') {
-      await clearUserState(id);
-      await ctx.reply('✅ Данные сохранены.', getMainKeyboard());
-      return;
-    }
-
-    // ========== INFO PAGES ==========
-    if (payload === 'menu_doveren') {
-      await ctx.reply(DOVEREN_MESSAGE, getBackKeyboard());
-      return;
-    }
-
-    if (payload === 'menu_podderzhka') {
-      await ctx.reply(PODDERZHKA_MESSAGE, getPodderzhkaKeyboard());
-      return;
-    }
-
-    if (payload === 'menu_privacy') {
-      await ctx.reply(PRIVACY_MESSAGE, getPrivacyKeyboard());
-      return;
-    }
-
-    if (payload === 'menu_channels') {
-      await ctx.reply(CHANNELS_MESSAGE, getChannelsKeyboard());
-      return;
-    }
-
-  } catch (error) {
-    log('ERROR', 'Callback handler error', error);
-    console.error('Callback error:', error);
-  }
-});
-
 // ============== BOT STARTED ==============
 
 bot.on('bot_started', async (ctx) => {
@@ -770,11 +531,11 @@ bot.on('bot_started', async (ctx) => {
   await getOrCreateUser(id, getUserData(ctx));
 
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
 
   await clearUserState(id);
-  ctx.reply(WELCOME_MESSAGE, getMainKeyboard());
+  ctx.reply(WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
 
 // ============== COMMANDS ==============
@@ -787,11 +548,11 @@ bot.command('start', async (ctx) => {
   await getOrCreateUser(id, getUserData(ctx));
 
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
 
   await clearUserState(id);
-  ctx.reply(WELCOME_MESSAGE, getMainKeyboard());
+  ctx.reply(WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
 
 bot.command('patient', async (ctx) => {
@@ -799,9 +560,9 @@ bot.command('patient', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
-  ctx.reply(PATIENT_MENU_MESSAGE, getPatientKeyboard());
+  ctx.reply(PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
 });
 
 bot.command('waitlist', async (ctx) => {
@@ -809,10 +570,10 @@ bot.command('waitlist', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
   await setUserState(id, 'waitlist', 'name', {});
-  ctx.reply('Напишите ваше имя:', getCancelKeyboard());
+  ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
 });
 
 bot.command('order', async (ctx) => {
@@ -820,9 +581,9 @@ bot.command('order', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
-  ctx.reply(ORDER_MESSAGE, getBackKeyboard());
+  ctx.reply(ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
 bot.command('question', async (ctx) => {
@@ -830,9 +591,9 @@ bot.command('question', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
-  ctx.reply(QUESTION_MENU_MESSAGE, getQuestionKeyboard());
+  ctx.reply(QUESTION_MENU_MESSAGE, { attachments: [QuestionKeyboard] });
 });
 
 bot.command('feldsher', async (ctx) => {
@@ -840,10 +601,10 @@ bot.command('feldsher', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
   await setUserState(id, 'feldsher', 'name', {});
-  ctx.reply('Как вас зовут?', getCancelKeyboard());
+  ctx.reply('Как вас зовут?', { attachments: [CancelKeyboard] });
 });
 
 bot.command('doveren', async (ctx) => {
@@ -851,9 +612,9 @@ bot.command('doveren', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
-  ctx.reply(DOVEREN_MESSAGE, getBackKeyboard());
+  ctx.reply(DOVEREN_MESSAGE, { attachments: [BackKeyboard] });
 });
 
 bot.command('podderzhka', async (ctx) => {
@@ -861,9 +622,9 @@ bot.command('podderzhka', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
-  ctx.reply(PODDERZHKA_MESSAGE, getPodderzhkaKeyboard());
+  ctx.reply(PODDERZHKA_MESSAGE, { attachments: [PodderzhkaKeyboard] });
 });
 
 bot.command('revoke', async (ctx) => {
@@ -871,22 +632,21 @@ bot.command('revoke', async (ctx) => {
   if (!id) return;
   await getOrCreateUser(id, getUserData(ctx));
   await setUserState(id, 'revoke', 'confirm', {});
-  ctx.reply(REVOKE_MESSAGE, getRevokeKeyboard());
+  ctx.reply(REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
 });
 
 bot.command('privacy', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  ctx.reply(PRIVACY_MESSAGE, getPrivacyKeyboard());
+  ctx.reply(PRIVACY_MESSAGE, { attachments: [PrivacyKeyboard] });
 });
 
 bot.command('channels', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  ctx.reply(CHANNELS_MESSAGE, getChannelsKeyboard());
+  ctx.reply(CHANNELS_MESSAGE, { attachments: [ChannelsKeyboard] });
 });
 
-// Admin commands
 bot.command('admin_stats', async (ctx) => {
   const id = getUserId(ctx);
   if (!id || !isAdmin(id)) {
@@ -903,6 +663,185 @@ bot.command('admin_stats', async (ctx) => {
   }
 });
 
+// ============== CALLBACK HANDLERS ==============
+
+bot.action('consent_yes', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  await setUserConsent(id, true);
+  securityLog('CONSENT_GRANTED', id);
+  await ctx.reply('✅ Спасибо за согласие! Теперь вы можете пользоваться ботом.', { attachments: [MainKeyboard] });
+});
+
+bot.action('consent_no', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  securityLog('CONSENT_DENIED', id);
+  await ctx.reply('❌ Без согласия функционал бота недоступен. Напишите /start чтобы попробовать снова.');
+});
+
+bot.action('main_menu', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await clearUserState(id);
+  await ctx.reply(WELCOME_MESSAGE, { attachments: [MainKeyboard] });
+});
+
+bot.action('cancel_flow', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await clearUserState(id);
+  await ctx.reply('❌ Отменено.', { attachments: [MainKeyboard] });
+});
+
+bot.action('menu_patient', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await clearUserState(id);
+  await ctx.reply(PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
+});
+
+bot.action('patient_waitlist', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await setUserState(id, 'waitlist', 'name', {});
+  securityLog('WAITLIST_START', id);
+  await ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
+});
+
+bot.action('patient_order', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await ctx.reply(ORDER_MESSAGE, { attachments: [BackKeyboard] });
+});
+
+bot.action('menu_question', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await clearUserState(id);
+  await ctx.reply(QUESTION_MENU_MESSAGE, { attachments: [QuestionKeyboard] });
+});
+
+bot.action('question_ask', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await setUserState(id, 'question', 'name', {});
+  securityLog('QUESTION_START', id);
+  await ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
+});
+
+bot.action('menu_feldsher', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await setUserState(id, 'feldsher', 'name', {});
+  securityLog('FELDSHER_START', id);
+  await ctx.reply('Как вас зовут?', { attachments: [CancelKeyboard] });
+});
+
+bot.action('menu_doveren', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await ctx.reply(DOVEREN_MESSAGE, { attachments: [BackKeyboard] });
+});
+
+bot.action('menu_podderzhka', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await ctx.reply(PODDERZHKA_MESSAGE, { attachments: [PodderzhkaKeyboard] });
+});
+
+bot.action('menu_privacy', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await ctx.reply(PRIVACY_MESSAGE, { attachments: [PrivacyKeyboard] });
+});
+
+bot.action('menu_channels', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await ctx.reply(CHANNELS_MESSAGE, { attachments: [ChannelsKeyboard] });
+});
+
+bot.action('menu_revoke', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await setUserState(id, 'revoke', 'confirm', {});
+  await ctx.reply(REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
+});
+
+bot.action('revoke_yes', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await deleteAllUserData(id);
+  securityLog('DATA_DELETED', id);
+  log('INFO', `User ${id} revoked consent and deleted data`);
+  await ctx.reply('🗑️ Ваши данные удалены. Для использования бота напишите /start и примите согласие заново.');
+});
+
+bot.action('revoke_no', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await clearUserState(id);
+  await ctx.reply('✅ Данные сохранены.', { attachments: [MainKeyboard] });
+});
+
+bot.action(/district_(\d)/, async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+
+  const districtId = ctx.match?.[1];
+  const district = BOT_CONFIG.districts.find(d => d.id === districtId);
+
+  if (!district) {
+    return ctx.reply('Ошибка выбора района.', { attachments: [DistrictKeyboard] });
+  }
+
+  const state = await getUserState(id);
+  if (!state || state.flowType !== 'waitlist') {
+    return ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+  }
+
+  const stateData = state.data;
+  stateData.district = district.name;
+
+  try {
+    await saveWaitlistEntry(id, stateData);
+    await sendNotification('waitlist', stateData);
+    securityLog('WAITLIST_SAVED', id, { district: district.name });
+    await clearUserState(id);
+    await ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Вы добавлены в лист ожидания.
+
+Как только откроем фельдшерский кабинет, мы свяжемся с вами.`, { attachments: [BackKeyboard] });
+  } catch (e) {
+    log('ERROR', 'Failed to save waitlist', e);
+    await ctx.reply('Ошибка сохранения. Попробуйте позже.', { attachments: [MainKeyboard] });
+  }
+});
+
+bot.action(/schedule_(\d)/, async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+
+  const scheduleId = ctx.match?.[1];
+  const scheduleName = BOT_CONFIG.scheduleOptions[scheduleId as keyof typeof BOT_CONFIG.scheduleOptions];
+
+  if (!scheduleName) {
+    return ctx.reply('Ошибка выбора графика.', { attachments: [ScheduleKeyboard] });
+  }
+
+  const state = await getUserState(id);
+  if (!state || state.flowType !== 'feldsher') {
+    return ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+  }
+
+  const stateData = state.data;
+  stateData.scheduleType = scheduleName;
+  await setUserState(id, 'feldsher', 'resume', stateData);
+
+  await ctx.reply('Ссылка на резюме (Google Docs, hh.ru) или краткое описание опыта. Если нет резюме, напишите "нет":', { attachments: [CancelKeyboard] });
+});
+
 // ============== TEXT MESSAGE HANDLER ==============
 
 bot.on('message_created', async (ctx) => {
@@ -913,59 +852,55 @@ bot.on('message_created', async (ctx) => {
 
   log('INFO', `Message from user ${id}: ${text}`);
 
-  // Если нет согласия - показываем consent
   if (!(await hasUserConsent(id))) {
-    await ctx.reply('Пожалуйста, используйте кнопки для выбора.', getConsentKeyboard());
+    await ctx.reply('Пожалуйста, используйте кнопки для выбора.', { attachments: [ConsentKeyboard] });
     return;
   }
 
   const state = await getUserState(id);
   const sanitizedText = sanitizeInput(text, state?.flowType === 'question' && state?.currentStep === 'question' ? MAX_QUESTION_LENGTH : MAX_INPUT_LENGTH);
 
-  // Если нет состояния - показываем главное меню
   if (!state) {
-    await ctx.reply('Пожалуйста, используйте кнопки меню.', getMainKeyboard());
+    await ctx.reply('Пожалуйста, используйте кнопки меню.', { attachments: [MainKeyboard] });
     return;
   }
 
   const stateData = state.data;
 
-  // ========== WAITLIST FLOW ==========
   if (state.flowType === 'waitlist') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'waitlist', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', getCancelKeyboard());
+      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', getCancelKeyboard());
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', { attachments: [CancelKeyboard] });
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'waitlist', 'district', stateData);
-      return ctx.reply(DISTRICT_MESSAGE, getDistrictKeyboard());
+      return ctx.reply(DISTRICT_MESSAGE, { attachments: [DistrictKeyboard] });
     }
   }
 
-  // ========== FELDSHER FLOW ==========
   if (state.flowType === 'feldsher') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'feldsher', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', getCancelKeyboard());
+      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', getCancelKeyboard());
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', { attachments: [CancelKeyboard] });
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'feldsher', 'experience', stateData);
-      return ctx.reply('Ваш стаж работы (лет):', getCancelKeyboard());
+      return ctx.reply('Ваш стаж работы (лет):', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'experience') {
       stateData.experience = sanitizedText;
       await setUserState(id, 'feldsher', 'schedule', stateData);
-      return ctx.reply(SCHEDULE_MESSAGE, getScheduleKeyboard());
+      return ctx.reply(SCHEDULE_MESSAGE, { attachments: [ScheduleKeyboard] });
     }
     if (state.currentStep === 'resume') {
       stateData.resumeLink = sanitizedText.toLowerCase() === 'нет' ? '' : sanitizedText;
@@ -975,28 +910,27 @@ bot.on('message_created', async (ctx) => {
         securityLog('FELDSHER_SAVED', id);
         await clearUserState(id);
         return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Ваша анкета передана администратору.
-Мы свяжемся с вами в ближайшее время.`, getBackKeyboard());
+Мы свяжемся с вами в ближайшее время.`, { attachments: [BackKeyboard] });
       } catch (e) {
         log('ERROR', 'Failed to save feldsher application', e);
-        return ctx.reply('Ошибка сохранения. Попробуйте позже.', getMainKeyboard());
+        return ctx.reply('Ошибка сохранения. Попробуйте позже.', { attachments: [MainKeyboard] });
       }
     }
   }
 
-  // ========== QUESTION FLOW ==========
   if (state.flowType === 'question') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'question', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', getCancelKeyboard());
+      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', getCancelKeyboard());
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', { attachments: [CancelKeyboard] });
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'question', 'question', stateData);
-      return ctx.reply('Напишите ваш вопрос о проекте или кабинете:', getCancelKeyboard());
+      return ctx.reply('Напишите ваш вопрос о проекте или кабинете:', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'question') {
       stateData.question = sanitizedText;
@@ -1005,16 +939,15 @@ bot.on('message_created', async (ctx) => {
         await sendNotification('question', stateData);
         securityLog('QUESTION_SAVED', id);
         await clearUserState(id);
-        return ctx.reply(`✅ Спасибо за вопрос, ${escapeHtml(stateData.name)}! Мы получили его и свяжемся с вами в ближайшее время.`, getBackKeyboard());
+        return ctx.reply(`✅ Спасибо за вопрос, ${escapeHtml(stateData.name)}! Мы получили его и свяжемся с вами в ближайшее время.`, { attachments: [BackKeyboard] });
       } catch (e) {
         log('ERROR', 'Failed to save question', e);
-        return ctx.reply('Ошибка сохранения. Попробуйте позже.', getMainKeyboard());
+        return ctx.reply('Ошибка сохранения. Попробуйте позже.', { attachments: [MainKeyboard] });
       }
     }
   }
 
-  // Если состояние не распознано
-  await ctx.reply('Пожалуйста, используйте кнопки меню.', getMainKeyboard());
+  await ctx.reply('Пожалуйста, используйте кнопки меню.', { attachments: [MainKeyboard] });
 });
 
 bot.catch((err) => {
@@ -1034,7 +967,7 @@ async function startHttpServer(port: number) {
         return new Response(JSON.stringify({
           status: 'ok',
           bot: 'FeldsherRyadomBot for MAX',
-          version: '4.0',
+          version: '5.0',
           adminId: ADMIN_ID,
           channelId: CHANNEL_ID,
           time: new Date().toISOString()
@@ -1057,7 +990,7 @@ async function startHttpServer(port: number) {
 
 async function main() {
   log('INFO', 'FeldsherRyadomBot for MAX starting...');
-  console.log('🤖 FeldsherRyadomBot for MAX v4.0 starting...');
+  console.log('🤖 FeldsherRyadomBot for MAX v5.0 starting...');
   console.log(`📋 Admin ID: ${ADMIN_ID}`);
   console.log(`📢 Channel ID: ${CHANNEL_ID}`);
 
