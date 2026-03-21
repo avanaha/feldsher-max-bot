@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 1.5 - Fixed keyboard format
+ * Version: 4.0 - Button-only navigation (no text input for choices)
+ * Repository: https://github.com/avanaha/feldsher-max-bot
  */
 
 import { Bot, Keyboard } from '@maxhub/max-bot-api';
@@ -9,7 +10,7 @@ import { PrismaClient } from '@prisma/client';
 import { mkdirSync, existsSync, appendFileSync } from 'fs';
 import { join } from 'path';
 
-// ============== LOGGING SYSTEM ==============
+// ============== LOGGING ==============
 const LOG_DIR = '/app/data/logs';
 const LOG_FILE = join(LOG_DIR, 'bot.log');
 const SECURITY_LOG_FILE = join(LOG_DIR, 'security.log');
@@ -21,26 +22,18 @@ if (!existsSync(LOG_DIR)) {
 function log(level: string, message: string, data?: any) {
   const timestamp = new Date().toISOString();
   const logLine = `[${timestamp}] [${level}] ${message}${data ? ' | ' + JSON.stringify(data) : ''}\n`;
-  
-  try {
-    appendFileSync(LOG_FILE, logLine);
-  } catch (e) {}
-  
+  try { appendFileSync(LOG_FILE, logLine); } catch (e) {}
   console.log(`[${level}] ${message}`, data || '');
 }
 
 function securityLog(action: string, userId: number, details?: any) {
   const timestamp = new Date().toISOString();
   const logLine = `[${timestamp}] USER:${userId} ACTION:${action}${details ? ' | ' + JSON.stringify(details) : ''}\n`;
-  
-  try {
-    appendFileSync(SECURITY_LOG_FILE, logLine);
-  } catch (e) {}
-  
+  try { appendFileSync(SECURITY_LOG_FILE, logLine); } catch (e) {}
   log('SECURITY', `User ${userId}: ${action}`, details);
 }
 
-// ============== INPUT VALIDATION ==============
+// ============== VALIDATION ==============
 const MAX_INPUT_LENGTH = 500;
 const MAX_QUESTION_LENGTH = 1000;
 
@@ -53,20 +46,18 @@ function sanitizeInput(text: string, maxLength: number = MAX_INPUT_LENGTH): stri
 
 function escapeHtml(text: string): string {
   if (!text) return '';
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// ============== ADMIN CHECK ==============
-const ADMIN_ID = parseInt(process.env.MAX_ADMIN_ID || '0');
+// ============== CONFIG ==============
+const ADMIN_ID = parseInt(process.env.MAX_ADMIN_ID || '162749713');
+const CHANNEL_ID = process.env.MAX_CHANNEL_ID || '-72328888338961';
 
 function isAdmin(userId: number): boolean {
   return userId === ADMIN_ID;
 }
 
-// ============== DATABASE SETUP ==============
+// ============== DATABASE ==============
 const dataDir = '/app/data';
 if (!existsSync(dataDir)) {
   try {
@@ -77,15 +68,21 @@ if (!existsSync(dataDir)) {
   }
 }
 
-const prisma = new PrismaClient({
-  log: ['error'],
-});
+const prisma = new PrismaClient({ log: ['error'] });
 
-// ============== CONFIGURATION ==============
 const BOT_CONFIG = {
   token: process.env.MAX_BOT_TOKEN || '',
   adminId: ADMIN_ID,
+  channelId: CHANNEL_ID,
   port: parseInt(process.env.PORT || '8080'),
+  feldsherChannelLink: 'https://max.ru/join/rre51qvmREhGKRnNFf4vcVZ_U3mj_obCY8L2wNHAxo8',
+  patientChannelLink: 'https://max.ru/join/TL81d4e3h5J-_txDDk7T0d_pa_kPUduvCNH5cg4aqzg',
+  planetaLink: 'https://planeta.ru/campaigns/feldsherryadom',
+  sberLink: 'https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM',
+  supportPhone: '+7 (965) 843-78-18',
+  privacyLink: 'https://feldsher-land.ru/legal',
+  vkPatientLink: 'https://vk.com/feldsherryadom',
+  vkFeldsherLink: 'https://vk.com/feldsherizh',
   districts: [
     { id: '1', name: 'Индустриальный' },
     { id: '2', name: 'Ленинский' },
@@ -94,8 +91,8 @@ const BOT_CONFIG = {
     { id: '5', name: 'Устиновский' },
   ],
   scheduleOptions: {
-    'schedule_16': 'Вариант 1 (16 смен)',
-    'schedule_12': 'Вариант 2 (12 смен)',
+    '1': '16 смен',
+    '2': '12 смен',
   },
 };
 
@@ -112,9 +109,7 @@ async function getOrCreateUser(maxId: number, userData: any) {
   const existing = await prisma.maxUser.findUnique({
     where: { maxId: maxId.toString() },
   });
-  
   if (existing) return existing;
-  
   return prisma.maxUser.create({
     data: {
       maxId: maxId.toString(),
@@ -145,7 +140,6 @@ async function deleteAllUserData(maxId: number) {
     where: { maxId: maxId.toString() },
   });
   if (!user) return false;
-  
   await prisma.maxUserState.deleteMany({ where: { maxUserId: user.id } });
   await prisma.maxWaitlistEntry.deleteMany({ where: { maxUserId: user.id } });
   await prisma.maxFeldsherApplication.deleteMany({ where: { maxUserId: user.id } });
@@ -172,7 +166,6 @@ async function setUserState(maxId: number, flowType: string, currentStep: string
     where: { maxId: maxId.toString() },
   });
   if (!user) return null;
-  
   return prisma.maxUserState.upsert({
     where: { maxUserId: user.id },
     create: { maxUserId: user.id, flowType, currentStep, data: JSON.stringify(data) },
@@ -194,13 +187,12 @@ async function saveWaitlistEntry(maxId: number, data: any) {
     where: { maxId: maxId.toString() },
   });
   if (!user) throw new Error('User not found');
-  
   return prisma.maxWaitlistEntry.create({
-    data: { 
-      maxUserId: user.id, 
-      name: sanitizeInput(data.name, 100), 
-      phone: sanitizeInput(data.phone, 20), 
-      district: sanitizeInput(data.district, 50) 
+    data: {
+      maxUserId: user.id,
+      name: sanitizeInput(data.name, 100),
+      phone: sanitizeInput(data.phone, 20),
+      district: sanitizeInput(data.district, 50)
     },
   });
 }
@@ -210,7 +202,6 @@ async function saveFeldsherApplication(maxId: number, data: any) {
     where: { maxId: maxId.toString() },
   });
   if (!user) throw new Error('User not found');
-  
   return prisma.maxFeldsherApplication.create({
     data: {
       maxUserId: user.id,
@@ -228,13 +219,12 @@ async function saveQuestion(maxId: number, data: any) {
     where: { maxId: maxId.toString() },
   });
   if (!user) throw new Error('User not found');
-  
   return prisma.maxQuestion.create({
-    data: { 
-      maxUserId: user.id, 
-      name: sanitizeInput(data.name, 100), 
-      phone: sanitizeInput(data.phone, 20), 
-      question: sanitizeInput(data.question, MAX_QUESTION_LENGTH) 
+    data: {
+      maxUserId: user.id,
+      name: sanitizeInput(data.name, 100),
+      phone: sanitizeInput(data.phone, 20),
+      question: sanitizeInput(data.question, MAX_QUESTION_LENGTH)
     },
   });
 }
@@ -243,7 +233,7 @@ async function saveQuestion(maxId: number, data: any) {
 
 async function sendNotification(type: string, data: any) {
   let message = '';
-  
+
   if (type === 'waitlist') {
     message = `📋 Новая заявка в лист ожидания:
 👤 Имя: ${escapeHtml(data.name)}
@@ -262,10 +252,26 @@ async function sendNotification(type: string, data: any) {
 📞 Телефон: ${escapeHtml(data.phone)}
 💬 Вопрос: ${escapeHtml(data.question)}`;
   }
-  
-  if (ADMIN_ID && message) {
+
+  if (!message) return;
+
+  if (BOT_CONFIG.channelId) {
+    try {
+      const chatId = parseInt(BOT_CONFIG.channelId);
+      if (!isNaN(chatId)) {
+        await bot.api.sendMessage(chatId, message);
+        log('INFO', `Notification sent to channel ${BOT_CONFIG.channelId}`);
+        return;
+      }
+    } catch (e) {
+      log('WARN', 'Failed to send to channel, trying admin', e);
+    }
+  }
+
+  if (ADMIN_ID) {
     try {
       await bot.api.sendMessage(ADMIN_ID, message);
+      log('INFO', `Notification sent to admin ${ADMIN_ID}`);
     } catch (e) {
       log('ERROR', 'Failed to send notification', e);
     }
@@ -289,25 +295,40 @@ function formatPhone(phone: string): string {
 
 // ============== MESSAGES ==============
 
-const CONSENT_MESSAGE = `🔐 Перед началом использования бота подтвердите согласие с Политикой конфиденциальности и согласие на обработку персональных данных по ссылкам ниже:
+const CONSENT_MESSAGE = `✅ СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСОНАЛЬНЫХ ДАННЫХ
 
-📄 Политика конфиденциальности:
-стр. 1: https://t.me/FeldsherRyadom/10
-стр. 2: https://t.me/FeldsherRyadom/11
+Я, заполняя форму в боте @id1800048162_1_bot (https://max.ru/id1800048162_1_bot), даю своё добровольное и информированное согласие
+Обществу с ограниченной ответственностью «Фельдшер и компания»
+(ООО «Фельдшер и Ко», ИНН 1800048162, ОГРН 1261800002694, юридический адрес: 426000, РФ, Удмуртская Республика, г. Ижевск)
+на обработку моих персональных данных, которые я укажу далее (имя, номер телефона, предпочитаемый район обслуживания, сведения об опыте работы, ссылка на резюме), с целями:
+– формирования листа ожидания открытия фельдшерского кабинета;
+– связи со мной по вопросам проекта;
+– рассмотрения моей кандидатуры в качестве фельдшера (для соискателей);
+– ответа на мои вопросы.
 
-📝 Согласие на обработку персональных данных:
-https://t.me/FeldsherRyadom/5
+Обработка включает в себя (в соответствии с п. 3 ст. 3 Федерального закона № 152-ФЗ): сбор, запись, систематизацию, накопление, хранение, уточнение (обновление, изменение), извлечение, использование, передачу (в целях, указанных выше), обезличивание, блокирование, удаление, уничтожение персональных данных.
 
-Напишите "согласен" или "согласна" для продолжения.`;
+Я ознакомлен(а) с Политикой конфиденциальности Оператора – она доступна по команде /privacy в этом боте, а также в закреплённых сообщениях каналов в «Макс» и ВКонтакте, и на сайте https://feldsher-land.ru/legal.html
+
+Срок действия согласия: с момента его предоставления до достижения целей обработки либо до момента отзыва согласия субъектом.
+Я могу отозвать это согласие в любой момент, написав об этом в данного бота (например, отправив сообщение с текстом «Отозвать согласие»), либо по электронной почте feldland@yandex.ru. Отзыв согласия не имеет обратной силы в части уже обработанных данных.
+
+✅ Согласен (-на).
+Ваш выбор означает, что вы прочитали условия и подтверждаете своё согласие на эти условия.
+
+❌ Не согласен (-на).
+Ваш выбор означает, что вы прочитали условия и не подтверждаете своё согласие на эти условия.
+В этом случае, функционал бота будет вам недоступен.`;
 
 const WELCOME_MESSAGE = `👋 Здравствуйте! Я бот проекта «Фельдшеръ.Рядом».
 
 Я помогу:
-📋 записаться в лист ожидания открытия кабинета (/waitlist)
-❓ задать вопрос о проекте (/question)
-👨‍⚕️ оставить резюме фельдшеру (/feldsher)
-❤️ поддержать проект (/podderzhka)
-📄 получить текст доверенности (/doveren)`;
+📋 Записаться в лист ожидания открытия кабинета;
+❓ Задать вопрос о проекте;
+👨‍⚕️ Оставить резюме фельдшеру;
+❤️ Поддержать проект.
+
+Выберите, что вас интересует:`;
 
 const DOVEREN_MESSAGE = `📄 ДОВЕРЕННОСТЬ
 
@@ -324,34 +345,219 @@ const DOVEREN_MESSAGE = `📄 ДОВЕРЕННОСТЬ
 ПОДПИСЬ, РАСШИФРОВКА ПОДПИСИ
 (ДАТА НАПИСАНИЯ ДОВЕРЕННОСТИ)`;
 
-const PRIVACY_MESSAGE = `Политика конфиденциальности и согласие на обработку персональных данных по ссылкам ниже:
+const PRIVACY_MESSAGE = `🔐 СВОД ПРАВИЛ
 
-📄 Политика конфиденциальности:
-стр. 1: https://t.me/FeldsherRyadom/10
-стр. 2: https://t.me/FeldsherRyadom/11
+Политика конфиденциальности и согласие на обработку персональных данных по ссылкам ниже:
 
-📝 Согласие на обработку персональных данных:
-https://t.me/FeldsherRyadom/5`;
+📄 Политика конфиденциальности находится по ссылке:
+https://feldsher-land.ru/legal
 
-const PODDERZHKA_MESSAGE = `Спасибо за желание помочь проекту «Фельдшеръ.Рядом»! ❤️
+🔐 Согласие на обработку персональных данных:
+Действует для этого бота, его нужно принять перед использованием бота.`;
+
+const CHANNELS_MESSAGE = `📢 НАШИ КАНАЛЫ
+
+Друзья, вы можете подписаться на наши каналы по ссылкам ниже:
+
+Пациентам:
+
+🟪 MAX
+https://max.ru/join/TL81d4e3h5J-_txDDk7T0d_pa_kPUduvCNH5cg4aqzg
+
+🔵 VK
+https://vk.com/feldsherryadom
+
+Фельдшерам:
+
+🟪 MAX
+https://max.ru/join/rre51qvmREhGKRnNFf4vcVZ_U3mj_obCY8L2wNHAxo8
+
+🔵 VK
+https://vk.com/feldsherizh`;
+
+const PODDERZHKA_MESSAGE = `❤️ ПОДДЕРЖАТЬ ПРОЕКТ
+
+Спасибо за желание помочь проекту «Фельдшеръ.Рядом»! ❤️
+
+Сбор средств на платформе краудфандинга:
+https://planeta.ru/campaigns/feldsherryadom
 
 Перевод по ссылке:
 https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM
 
 Если хотите отправить анонимно, то можете сделать перевод напрямую по номеру телефона:
-📞 +7 (965) 843-78-18`;
+📞 +7 (965) 843-78-18 (лучше добавить комментарий про фельдшерский кабинет)`;
 
-// ============== HELPER TO GET USER ID ==============
+const ORDER_MESSAGE = `💰 ОПЛАТА ПРЕДЗАКАЗА
+
+Для оплаты предзаказа воспользуйтесь ссылкой:
+[Ссылка будет добавлена позже]
+
+Если у вас возникли вопросы, напишите нам:
+📧 feldland@yandex.ru`;
+
+const REVOKE_MESSAGE = `🗑️ ОТЗЫВ СОГЛАСИЯ
+
+Вы уверены, что хотите отозвать согласие на обработку персональных данных?
+
+При отзыве согласия все ваши данные будут удалены из нашей базы данных, и вы потеряете доступ к функциям бота.`;
+
+const PATIENT_MENU_MESSAGE = `📋 МЕНЮ ПАЦИЕНТА
+
+Выберите действие:`;
+
+const QUESTION_MENU_MESSAGE = `❓ ВОПРОСЫ
+
+Выберите действие:`;
+
+const DISTRICT_MESSAGE = `📍 ВЫБОР РАЙОНА
+
+В каком районе вы планируете посещать кабинет?`;
+
+const SCHEDULE_MESSAGE = `📅 ВЫБОР ГРАФИКА
+
+У нас сменный режим работы по 5 часов.
+
+Вариант 1 (16 смен за 4 недели):
+16 будничных дней (по 4 дня в неделю) – распределение смен: 5 утренних (07:00–12:00), 6 дневных (12:00–17:00), 5 вечерних (16:00–21:00).
+
+Вариант 2 (12 смен за 4 недели):
+1 утренняя + 1 вечерняя в будни; 1 дневная каждое воскресенье.
+
+Какой формат вам подходит?`;
+
+// ============== KEYBOARDS ==============
+
+// Клавиатура согласия
+function getConsentKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('✅ Согласен (-на)', 'consent_yes')],
+    [Keyboard.button.callback('❌ Не согласен (-на)', 'consent_no')],
+  ]);
+}
+
+// Главное меню
+function getMainKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('📋 Пациентам', 'menu_patient')],
+    [Keyboard.button.callback('❓ У меня есть вопрос', 'menu_question')],
+    [Keyboard.button.callback('👨‍⚕️ Фельдшеру – отправить резюме', 'menu_feldsher')],
+    [Keyboard.button.callback('📄 Текст доверенности', 'menu_doveren')],
+    [Keyboard.button.callback('❤️ Поддержать проект', 'menu_podderzhka')],
+    [Keyboard.button.callback('🗑️ Отозвать согласие', 'menu_revoke')],
+    [Keyboard.button.callback('🔐 Свод правил', 'menu_privacy')],
+    [Keyboard.button.callback('📢 Наши каналы', 'menu_channels')],
+  ]);
+}
+
+// Меню пациента
+function getPatientKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('📋 Лист ожидания', 'patient_waitlist')],
+    [Keyboard.button.callback('💰 Оплатить предзаказ', 'patient_order')],
+    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  ]);
+}
+
+// Меню вопросов
+function getQuestionKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('❓ Задать вопрос', 'question_ask')],
+    [Keyboard.button.callback('🗑️ Отозвать согласие', 'menu_revoke')],
+    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  ]);
+}
+
+// Клавиатура отмены
+function getCancelKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+  ]);
+}
+
+// Клавиатура отмены + главное меню
+function getCancelMenuKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  ]);
+}
+
+// Выбор района
+function getDistrictKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('1. Индустриальный', 'district_1')],
+    [Keyboard.button.callback('2. Ленинский', 'district_2')],
+    [Keyboard.button.callback('3. Октябрьский', 'district_3')],
+    [Keyboard.button.callback('4. Первомайский', 'district_4')],
+    [Keyboard.button.callback('5. Устиновский', 'district_5')],
+    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+  ]);
+}
+
+// Выбор графика
+function getScheduleKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('Вариант 1 (16 смен)', 'schedule_1')],
+    [Keyboard.button.callback('Вариант 2 (12 смен)', 'schedule_2')],
+    [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+  ]);
+}
+
+// Подтверждение отзыва
+function getRevokeKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('✅ Да, удалить мои данные', 'revoke_yes')],
+    [Keyboard.button.callback('❌ Нет, я передумал', 'revoke_no')],
+  ]);
+}
+
+// Клавиатура возврата в меню
+function getBackKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  ]);
+}
+
+// Клавиатура с каналами
+function getChannelsKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.link('🟪 MAX (пациентам)', BOT_CONFIG.patientChannelLink)],
+    [Keyboard.button.link('🟪 MAX (фельдшерам)', BOT_CONFIG.feldsherChannelLink)],
+    [Keyboard.button.link('🔵 VK (пациентам)', BOT_CONFIG.vkPatientLink)],
+    [Keyboard.button.link('🔵 VK (фельдшерам)', BOT_CONFIG.vkFeldsherLink)],
+    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  ]);
+}
+
+// Клавиатура поддержки
+function getPodderzhkaKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.link('💰 Планета.ру', BOT_CONFIG.planetaLink)],
+    [Keyboard.button.link('💳 Сбер', BOT_CONFIG.sberLink)],
+    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  ]);
+}
+
+// Клавиатура с политикой
+function getPrivacyKeyboard() {
+  return Keyboard.inline([
+    [Keyboard.button.link('📄 Политика конфиденциальности', BOT_CONFIG.privacyLink)],
+    [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  ]);
+}
+
+// ============== HELPER ==============
 
 function getUserId(ctx: any): number | null {
-  const sender = ctx.sender || ctx.from || ctx.message?.sender;
+  const sender = ctx.sender || ctx.from || ctx.message?.sender || ctx.callback_query?.sender;
   if (sender?.user_id) return sender.user_id;
   if (sender?.id) return sender.id;
   return null;
 }
 
 function getUserData(ctx: any): any {
-  const sender = ctx.sender || ctx.from || ctx.message?.sender;
+  const sender = ctx.sender || ctx.from || ctx.message?.sender || ctx.callback_query?.sender;
   return {
     username: sender?.username || '',
     firstName: sender?.first_name || sender?.name || '',
@@ -359,53 +565,333 @@ function getUserData(ctx: any): any {
   };
 }
 
-// ============== BOT HANDLERS ==============
+// ============== CALLBACK HANDLERS ==============
+
+// Согласие
+bot.on('callback_query', async (ctx: any) => {
+  const id = getUserId(ctx);
+  const callbackId = ctx.callback_query?.callback_id || ctx.callbackId;
+  const payload = ctx.callback_query?.payload || ctx.payload;
+
+  if (!id || !payload) return;
+
+  log('INFO', `Callback from user ${id}: ${payload}`);
+
+  try {
+    // ========== CONSENT ==========
+    if (payload === 'consent_yes') {
+      await getOrCreateUser(id, getUserData(ctx));
+      await setUserConsent(id, true);
+      securityLog('CONSENT_GRANTED', id);
+      await ctx.reply('✅ Спасибо за согласие! Теперь вы можете пользоваться ботом.', getMainKeyboard());
+      return;
+    }
+
+    if (payload === 'consent_no') {
+      securityLog('CONSENT_DENIED', id);
+      await ctx.reply('❌ Без согласия функционал бота недоступен. Напишите /start чтобы попробовать снова.');
+      return;
+    }
+
+    // Проверка согласия для остальных действий
+    if (!(await hasUserConsent(id))) {
+      await ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+      return;
+    }
+
+    // ========== MAIN MENU ==========
+    if (payload === 'main_menu') {
+      await clearUserState(id);
+      await ctx.reply(WELCOME_MESSAGE, getMainKeyboard());
+      return;
+    }
+
+    // ========== CANCEL ==========
+    if (payload === 'cancel_flow') {
+      await clearUserState(id);
+      await ctx.reply('❌ Отменено.', getMainKeyboard());
+      return;
+    }
+
+    // ========== PATIENT MENU ==========
+    if (payload === 'menu_patient') {
+      await clearUserState(id);
+      await ctx.reply(PATIENT_MENU_MESSAGE, getPatientKeyboard());
+      return;
+    }
+
+    if (payload === 'patient_waitlist') {
+      await setUserState(id, 'waitlist', 'name', {});
+      securityLog('WAITLIST_START', id);
+      await ctx.reply('Напишите ваше имя:', getCancelKeyboard());
+      return;
+    }
+
+    if (payload === 'patient_order') {
+      await ctx.reply(ORDER_MESSAGE, getBackKeyboard());
+      return;
+    }
+
+    // ========== QUESTION MENU ==========
+    if (payload === 'menu_question') {
+      await clearUserState(id);
+      await ctx.reply(QUESTION_MENU_MESSAGE, getQuestionKeyboard());
+      return;
+    }
+
+    if (payload === 'question_ask') {
+      await setUserState(id, 'question', 'name', {});
+      securityLog('QUESTION_START', id);
+      await ctx.reply('Напишите ваше имя:', getCancelKeyboard());
+      return;
+    }
+
+    // ========== FELDSHER ==========
+    if (payload === 'menu_feldsher') {
+      await setUserState(id, 'feldsher', 'name', {});
+      securityLog('FELDSHER_START', id);
+      await ctx.reply('Как вас зовут?', getCancelKeyboard());
+      return;
+    }
+
+    // ========== DISTRICT SELECTION ==========
+    if (payload.startsWith('district_')) {
+      const districtId = payload.replace('district_', '');
+      const district = BOT_CONFIG.districts.find(d => d.id === districtId);
+
+      if (!district) {
+        await ctx.reply('Ошибка выбора района. Попробуйте снова.', getDistrictKeyboard());
+        return;
+      }
+
+      const state = await getUserState(id);
+      if (!state || state.flowType !== 'waitlist') {
+        await ctx.reply('Ошибка. Начните заново.', getMainKeyboard());
+        return;
+      }
+
+      const stateData = state.data;
+      stateData.district = district.name;
+
+      try {
+        await saveWaitlistEntry(id, stateData);
+        await sendNotification('waitlist', stateData);
+        securityLog('WAITLIST_SAVED', id, { district: district.name });
+        await clearUserState(id);
+        await ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Вы добавлены в лист ожидания.
+
+Как только откроем фельдшерский кабинет, мы свяжемся с вами.`, getBackKeyboard());
+      } catch (e) {
+        log('ERROR', 'Failed to save waitlist', e);
+        await ctx.reply('Ошибка сохранения. Попробуйте позже.', getMainKeyboard());
+      }
+      return;
+    }
+
+    // ========== SCHEDULE SELECTION ==========
+    if (payload.startsWith('schedule_')) {
+      const scheduleId = payload.replace('schedule_', '');
+      const scheduleName = BOT_CONFIG.scheduleOptions[scheduleId as keyof typeof BOT_CONFIG.scheduleOptions];
+
+      if (!scheduleName) {
+        await ctx.reply('Ошибка выбора графика. Попробуйте снова.', getScheduleKeyboard());
+        return;
+      }
+
+      const state = await getUserState(id);
+      if (!state || state.flowType !== 'feldsher') {
+        await ctx.reply('Ошибка. Начните заново.', getMainKeyboard());
+        return;
+      }
+
+      const stateData = state.data;
+      stateData.scheduleType = scheduleName;
+      await setUserState(id, 'feldsher', 'resume', stateData);
+
+      await ctx.reply('Ссылка на резюме (Google Docs, hh.ru) или краткое описание опыта. Если нет резюме, напишите "нет":', getCancelKeyboard());
+      return;
+    }
+
+    // ========== REVOKE ==========
+    if (payload === 'menu_revoke') {
+      await setUserState(id, 'revoke', 'confirm', {});
+      await ctx.reply(REVOKE_MESSAGE, getRevokeKeyboard());
+      return;
+    }
+
+    if (payload === 'revoke_yes') {
+      await deleteAllUserData(id);
+      securityLog('DATA_DELETED', id);
+      log('INFO', `User ${id} revoked consent and deleted data`);
+      await ctx.reply('🗑️ Ваши данные удалены. Для использования бота напишите /start и примите согласие заново.');
+      return;
+    }
+
+    if (payload === 'revoke_no') {
+      await clearUserState(id);
+      await ctx.reply('✅ Данные сохранены.', getMainKeyboard());
+      return;
+    }
+
+    // ========== INFO PAGES ==========
+    if (payload === 'menu_doveren') {
+      await ctx.reply(DOVEREN_MESSAGE, getBackKeyboard());
+      return;
+    }
+
+    if (payload === 'menu_podderzhka') {
+      await ctx.reply(PODDERZHKA_MESSAGE, getPodderzhkaKeyboard());
+      return;
+    }
+
+    if (payload === 'menu_privacy') {
+      await ctx.reply(PRIVACY_MESSAGE, getPrivacyKeyboard());
+      return;
+    }
+
+    if (payload === 'menu_channels') {
+      await ctx.reply(CHANNELS_MESSAGE, getChannelsKeyboard());
+      return;
+    }
+
+  } catch (error) {
+    log('ERROR', 'Callback handler error', error);
+    console.error('Callback error:', error);
+  }
+});
+
+// ============== BOT STARTED ==============
 
 bot.on('bot_started', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
+
   log('INFO', `User ${id} started bot (bot_started event)`);
   await getOrCreateUser(id, getUserData(ctx));
-  
+
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE);
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
   }
-  
+
   await clearUserState(id);
-  ctx.reply(WELCOME_MESSAGE);
+  ctx.reply(WELCOME_MESSAGE, getMainKeyboard());
 });
+
+// ============== COMMANDS ==============
 
 bot.command('start', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  
+
   log('INFO', `User ${id} used /start command`);
   await getOrCreateUser(id, getUserData(ctx));
-  
+
   if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE);
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
   }
-  
+
   await clearUserState(id);
-  ctx.reply(WELCOME_MESSAGE);
+  ctx.reply(WELCOME_MESSAGE, getMainKeyboard());
 });
 
-bot.command('admin_logs', async (ctx) => {
+bot.command('patient', async (ctx) => {
   const id = getUserId(ctx);
-  if (!id || !isAdmin(id)) {
-    return ctx.reply('⛔ Доступ запрещён.');
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
   }
-  securityLog('ADMIN_VIEW_LOGS', id);
-  ctx.reply(`📊 Логи бота:\n📁 /app/data/logs/\n📄 bot.log\n🔒 security.log`);
+  ctx.reply(PATIENT_MENU_MESSAGE, getPatientKeyboard());
 });
 
+bot.command('waitlist', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+  }
+  await setUserState(id, 'waitlist', 'name', {});
+  ctx.reply('Напишите ваше имя:', getCancelKeyboard());
+});
+
+bot.command('order', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+  }
+  ctx.reply(ORDER_MESSAGE, getBackKeyboard());
+});
+
+bot.command('question', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+  }
+  ctx.reply(QUESTION_MENU_MESSAGE, getQuestionKeyboard());
+});
+
+bot.command('feldsher', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+  }
+  await setUserState(id, 'feldsher', 'name', {});
+  ctx.reply('Как вас зовут?', getCancelKeyboard());
+});
+
+bot.command('doveren', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+  }
+  ctx.reply(DOVEREN_MESSAGE, getBackKeyboard());
+});
+
+bot.command('podderzhka', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  if (!(await hasUserConsent(id))) {
+    return ctx.reply(CONSENT_MESSAGE, getConsentKeyboard());
+  }
+  ctx.reply(PODDERZHKA_MESSAGE, getPodderzhkaKeyboard());
+});
+
+bot.command('revoke', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await getOrCreateUser(id, getUserData(ctx));
+  await setUserState(id, 'revoke', 'confirm', {});
+  ctx.reply(REVOKE_MESSAGE, getRevokeKeyboard());
+});
+
+bot.command('privacy', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  ctx.reply(PRIVACY_MESSAGE, getPrivacyKeyboard());
+});
+
+bot.command('channels', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  ctx.reply(CHANNELS_MESSAGE, getChannelsKeyboard());
+});
+
+// Admin commands
 bot.command('admin_stats', async (ctx) => {
   const id = getUserId(ctx);
   if (!id || !isAdmin(id)) {
     return ctx.reply('⛔ Доступ запрещён.');
   }
-  securityLog('ADMIN_VIEW_STATS', id);
   try {
     const users = await prisma.maxUser.count();
     const waitlist = await prisma.maxWaitlistEntry.count();
@@ -417,208 +903,118 @@ bot.command('admin_stats', async (ctx) => {
   }
 });
 
-bot.command('waitlist', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  await getOrCreateUser(id, getUserData(ctx));
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE);
-  }
-  await setUserState(id, 'waitlist', 'name', {});
-  securityLog('WAITLIST_COMMAND', id);
-  ctx.reply('Напишите ваше имя:');
-});
-
-bot.command('question', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  await getOrCreateUser(id, getUserData(ctx));
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE);
-  }
-  await setUserState(id, 'question', 'name', {});
-  securityLog('QUESTION_COMMAND', id);
-  ctx.reply('Напишите ваше имя:');
-});
-
-bot.command('feldsher', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  await getOrCreateUser(id, getUserData(ctx));
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE);
-  }
-  await setUserState(id, 'feldsher', 'name', {});
-  securityLog('FELDSHER_COMMAND', id);
-  ctx.reply('Напишите ваше имя:');
-});
-
-bot.command('doveren', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  await getOrCreateUser(id, getUserData(ctx));
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE);
-  }
-  securityLog('DOVEREN_COMMAND', id);
-  ctx.reply(DOVEREN_MESSAGE);
-});
-
-bot.command('podderzhka', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  await getOrCreateUser(id, getUserData(ctx));
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE);
-  }
-  securityLog('PODDERZHKA_COMMAND', id);
-  ctx.reply(PODDERZHKA_MESSAGE);
-});
-
-bot.command('privacy', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  await getOrCreateUser(id, getUserData(ctx));
-  securityLog('PRIVACY_COMMAND', id);
-  ctx.reply(PRIVACY_MESSAGE);
-});
-
-// ============== TEXT HANDLER ==============
+// ============== TEXT MESSAGE HANDLER ==============
 
 bot.on('message_created', async (ctx) => {
   const id = getUserId(ctx);
   const text = ctx.message?.body?.text || ctx.message?.text;
-  
+
   if (!id || !text) return;
-  
+
   log('INFO', `Message from user ${id}: ${text}`);
-  
-  // Check for consent
-  const consentKeywords = ['согласен', 'согласна', 'да', 'yes'];
-  if (consentKeywords.some(k => text.toLowerCase().includes(k))) {
-    if (!(await hasUserConsent(id))) {
-      await getOrCreateUser(id, getUserData(ctx));
-      await setUserConsent(id, true);
-      securityLog('CONSENT_GRANTED', id);
-      return ctx.reply('✅ Спасибо за согласие! Напишите /start для начала работы.');
-    }
+
+  // Если нет согласия - показываем consent
+  if (!(await hasUserConsent(id))) {
+    await ctx.reply('Пожалуйста, используйте кнопки для выбора.', getConsentKeyboard());
+    return;
   }
-  
-  // Check for cancel
-  if (text === '❌ Отменить' || text.toLowerCase() === 'отмена' || text.toLowerCase() === 'cancel') {
-    await clearUserState(id);
-    securityLog('FLOW_CANCELLED', id);
-    return ctx.reply('❌ Отменено. Напишите /start для начала работы.');
-  }
-  
+
   const state = await getUserState(id);
+  const sanitizedText = sanitizeInput(text, state?.flowType === 'question' && state?.currentStep === 'question' ? MAX_QUESTION_LENGTH : MAX_INPUT_LENGTH);
+
+  // Если нет состояния - показываем главное меню
   if (!state) {
-    return ctx.reply('Напишите /start для начала работы.');
+    await ctx.reply('Пожалуйста, используйте кнопки меню.', getMainKeyboard());
+    return;
   }
-  
-  const sanitizedText = sanitizeInput(text, state.flowType === 'question' && state.currentStep === 'question' ? MAX_QUESTION_LENGTH : MAX_INPUT_LENGTH);
+
   const stateData = state.data;
-  
-  // Waitlist flow
+
+  // ========== WAITLIST FLOW ==========
   if (state.flowType === 'waitlist') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'waitlist', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9хх-ххх-хх-хх):');
-    } else if (state.currentStep === 'phone') {
+      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', getCancelKeyboard());
+    }
+    if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат. Введите номер в формате +7-9хх-ххх-хх-хх:');
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', getCancelKeyboard());
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'waitlist', 'district', stateData);
-      return ctx.reply('Выберите район (напишите цифру):\n1. Индустриальный\n2. Ленинский\n3. Октябрьский\n4. Первомайский\n5. Устиновский');
-    } else if (state.currentStep === 'district') {
-      const districtMap: Record<string, string> = {
-        '1': 'Индустриальный', '2': 'Ленинский', '3': 'Октябрьский', '4': 'Первомайский', '5': 'Устиновский'
-      };
-      const district = districtMap[sanitizedText] || sanitizedText;
-      stateData.district = district;
-      
-      try {
-        await saveWaitlistEntry(id, stateData);
-        await sendNotification('waitlist', stateData);
-        securityLog('WAITLIST_ENTRY_SAVED', id, { district });
-        await clearUserState(id);
-        return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Вы добавлены в лист ожидания.`);
-      } catch (e) {
-        log('ERROR', `Failed to save waitlist entry`, e);
-        return ctx.reply('Ошибка сохранения. Попробуйте позже.');
-      }
+      return ctx.reply(DISTRICT_MESSAGE, getDistrictKeyboard());
     }
-    return;
   }
-  
-  // Feldsher flow
+
+  // ========== FELDSHER FLOW ==========
   if (state.flowType === 'feldsher') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'feldsher', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9хх-ххх-хх-хх):');
-    } else if (state.currentStep === 'phone') {
+      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', getCancelKeyboard());
+    }
+    if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат. Введите номер в формате +7-9хх-ххх-хх-хх:');
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', getCancelKeyboard());
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'feldsher', 'experience', stateData);
-      return ctx.reply('Ваш стаж работы (лет):');
-    } else if (state.currentStep === 'experience') {
+      return ctx.reply('Ваш стаж работы (лет):', getCancelKeyboard());
+    }
+    if (state.currentStep === 'experience') {
       stateData.experience = sanitizedText;
       await setUserState(id, 'feldsher', 'schedule', stateData);
-      return ctx.reply('Выберите график (напишите 1 или 2):\n1. 16 смен\n2. 12 смен');
-    } else if (state.currentStep === 'schedule') {
-      const scheduleMap: Record<string, string> = { '1': '16 смен', '2': '12 смен' };
-      stateData.scheduleType = scheduleMap[sanitizedText] || sanitizedText;
-      await setUserState(id, 'feldsher', 'resume', stateData);
-      return ctx.reply('Ссылка на резюме или описание опыта (или напишите "нет"):');
-    } else if (state.currentStep === 'resume') {
-      stateData.resumeLink = sanitizedText === 'нет' ? '' : sanitizedText;
+      return ctx.reply(SCHEDULE_MESSAGE, getScheduleKeyboard());
+    }
+    if (state.currentStep === 'resume') {
+      stateData.resumeLink = sanitizedText.toLowerCase() === 'нет' ? '' : sanitizedText;
       try {
         await saveFeldsherApplication(id, stateData);
         await sendNotification('feldsher', stateData);
-        securityLog('FELDSHER_APPLICATION_SAVED', id);
+        securityLog('FELDSHER_SAVED', id);
         await clearUserState(id);
-        return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Ваша анкета принята.`);
+        return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Ваша анкета передана администратору.
+Мы свяжемся с вами в ближайшее время.`, getBackKeyboard());
       } catch (e) {
-        log('ERROR', `Failed to save feldsher application`, e);
-        return ctx.reply('Ошибка сохранения. Попробуйте позже.');
+        log('ERROR', 'Failed to save feldsher application', e);
+        return ctx.reply('Ошибка сохранения. Попробуйте позже.', getMainKeyboard());
       }
     }
-    return;
   }
-  
-  // Question flow
+
+  // ========== QUESTION FLOW ==========
   if (state.flowType === 'question') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'question', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9хх-ххх-хх-хх):');
-    } else if (state.currentStep === 'phone') {
+      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', getCancelKeyboard());
+    }
+    if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат. Введите номер в формате +7-9хх-ххх-хх-хх:');
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', getCancelKeyboard());
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'question', 'question', stateData);
-      return ctx.reply('Напишите ваш вопрос:');
-    } else if (state.currentStep === 'question') {
+      return ctx.reply('Напишите ваш вопрос о проекте или кабинете:', getCancelKeyboard());
+    }
+    if (state.currentStep === 'question') {
       stateData.question = sanitizedText;
       try {
         await saveQuestion(id, stateData);
         await sendNotification('question', stateData);
         securityLog('QUESTION_SAVED', id);
         await clearUserState(id);
-        return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Ваш вопрос принят.`);
+        return ctx.reply(`✅ Спасибо за вопрос, ${escapeHtml(stateData.name)}! Мы получили его и свяжемся с вами в ближайшее время.`, getBackKeyboard());
       } catch (e) {
-        log('ERROR', `Failed to save question`, e);
-        return ctx.reply('Ошибка сохранения. Попробуйте позже.');
+        log('ERROR', 'Failed to save question', e);
+        return ctx.reply('Ошибка сохранения. Попробуйте позже.', getMainKeyboard());
       }
     }
-    return;
   }
+
+  // Если состояние не распознано
+  await ctx.reply('Пожалуйста, используйте кнопки меню.', getMainKeyboard());
 });
 
 bot.catch((err) => {
@@ -626,31 +1022,34 @@ bot.catch((err) => {
   console.error('Bot error:', err);
 });
 
-// ============== HTTP SERVER FOR AMVERA ==============
+// ============== HTTP SERVER ==============
 
 async function startHttpServer(port: number) {
   const server = Bun.serve({
     port: port,
     fetch(req) {
       const url = new URL(req.url);
-      
+
       if (url.pathname === '/health' || url.pathname === '/') {
-        return new Response(JSON.stringify({ 
-          status: 'ok', 
+        return new Response(JSON.stringify({
+          status: 'ok',
           bot: 'FeldsherRyadomBot for MAX',
+          version: '4.0',
+          adminId: ADMIN_ID,
+          channelId: CHANNEL_ID,
           time: new Date().toISOString()
         }), {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      
+
       return new Response('Not found', { status: 404 });
     },
   });
-  
+
   log('INFO', `HTTP server started on port ${port}`);
   console.log(`🌐 HTTP server listening on port ${port}`);
-  
+
   return server;
 }
 
@@ -658,8 +1057,10 @@ async function startHttpServer(port: number) {
 
 async function main() {
   log('INFO', 'FeldsherRyadomBot for MAX starting...');
-  console.log('🤖 FeldsherRyadomBot for MAX starting...');
-  
+  console.log('🤖 FeldsherRyadomBot for MAX v4.0 starting...');
+  console.log(`📋 Admin ID: ${ADMIN_ID}`);
+  console.log(`📢 Channel ID: ${CHANNEL_ID}`);
+
   try {
     await prisma.$connect();
     log('INFO', 'Database connected');
@@ -669,20 +1070,22 @@ async function main() {
     console.error('❌ Database connection failed:', error);
     process.exit(1);
   }
-  
-  // Start HTTP server for Amvera health checks
+
   await startHttpServer(BOT_CONFIG.port);
-  
-  // Set bot commands
+
   try {
     await bot.api.setMyCommands([
-      { name: 'start', description: 'Начать работу с ботом' },
-      { name: 'waitlist', description: 'Записаться в лист ожидания' },
-      { name: 'question', description: 'Задать вопрос' },
-      { name: 'feldsher', description: 'Отправить резюме фельдшера' },
-      { name: 'doveren', description: 'Текст доверенности' },
-      { name: 'podderzhka', description: 'Поддержать проект' },
-      { name: 'privacy', description: 'Политика конфиденциальности' },
+      { name: 'start', description: '🏠 Главное меню' },
+      { name: 'patient', description: '📋 Пациенту' },
+      { name: 'waitlist', description: '📋 Лист ожидания' },
+      { name: 'order', description: '💰 Оплатить предзаказ' },
+      { name: 'question', description: '❓ Задать вопрос' },
+      { name: 'feldsher', description: '👨‍⚕️ Фельдшеру' },
+      { name: 'doveren', description: '📄 Доверенность' },
+      { name: 'podderzhka', description: '❤️ Поддержать' },
+      { name: 'revoke', description: '🗑️ Отозвать согласие' },
+      { name: 'privacy', description: '🔐 Свод правил' },
+      { name: 'channels', description: '📢 Наши каналы' },
     ]);
     log('INFO', 'Bot commands set successfully');
     console.log('✅ Bot commands set');
@@ -690,13 +1093,12 @@ async function main() {
     log('WARN', 'Could not set bot commands', error);
     console.log('⚠️ Could not set bot commands');
   }
-  
-  // Start bot with polling
+
   log('INFO', 'Starting bot with polling...');
   console.log('🔄 Starting bot with polling...');
-  
+
   bot.start();
-  
+
   log('INFO', 'Bot started successfully');
   console.log('✅ Bot started successfully!');
 }
