@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 6.0 - Preview confirmation before sending
+ * Version: 7.0 - Fixed callback handlers and consent flow
  * Repository: https://github.com/avanaha/feldsher-max-bot
  */
 
@@ -116,12 +116,17 @@ async function getOrCreateUser(maxId: number, userData: any) {
   });
 }
 
-async function hasUserConsent(maxId: number) {
-  const user = await prisma.maxUser.findUnique({
-    where: { maxId: maxId.toString() },
-    select: { hasConsent: true },
-  });
-  return user?.hasConsent ?? false;
+async function hasUserConsent(maxId: number): Promise<boolean> {
+  try {
+    const user = await prisma.maxUser.findUnique({
+      where: { maxId: maxId.toString() },
+      select: { hasConsent: true },
+    });
+    return user?.hasConsent ?? false;
+  } catch (e) {
+    log('ERROR', 'hasUserConsent error', e);
+    return false;
+  }
 }
 
 async function setUserConsent(maxId: number, consent: boolean) {
@@ -278,15 +283,12 @@ async function sendNotification(type: string, data: any) {
 
 function validatePhone(phone: string): boolean {
   const digits = phone.replace(/\D/g, '');
-  // Проверяем: код страны (7 или 8) + 10 цифр = 11 цифр всего
-  // Или просто 10 цифр (без кода страны)
   if (digits.length === 11 && (digits.startsWith('7') || digits.startsWith('8'))) {
     return true;
   }
   if (digits.length === 10) {
     return true;
   }
-  // Также проверяем формат с + и разделителями
   const cleaned = phone.replace(/\s/g, '');
   return /^\+?[0-9][0-9\-\s]{9,15}$/.test(cleaned);
 }
@@ -370,7 +372,7 @@ https://feldsher-land.ru/legal
 
 const CHANNELS_MESSAGE = `📢 НАШИ КАНАЛЫ
 
-Друзья, вы можете подписиться на наши каналы по ссылкам ниже:
+Друзья, вы можете подписаться на наши каналы по ссылкам ниже:
 
 Пациентам:
 
@@ -442,7 +444,7 @@ const MainKeyboard = Keyboard.inlineKeyboard([
 ]);
 
 const PatientKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('📋 Лист ожидания', 'patient_waitlist')],
+  [Keyboard.button.callback('📋 Хочу в лист ожидания', 'patient_waitlist')],
   [Keyboard.button.callback('💰 Оплатить предзаказ', 'patient_order')],
   [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
 ]);
@@ -457,7 +459,6 @@ const CancelKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
 ]);
 
-// Районы для листа ожидания
 function getDistrictKeyboard() {
   return Keyboard.inlineKeyboard([
     [Keyboard.button.callback('1. Индустриальный', 'district_1')],
@@ -468,13 +469,11 @@ function getDistrictKeyboard() {
   ]);
 }
 
-// График для фельдшера
 const ScheduleKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('16 смен (основной фельдшер)', 'schedule_16')],
   [Keyboard.button.callback('12 смен (воскресный фельдшер)', 'schedule_12')],
 ]);
 
-// Клавиатура подтверждения
 const ConfirmKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('✅ Отправить', 'confirm_send')],
   [Keyboard.button.callback('❌ Не отправлять', 'confirm_cancel')],
@@ -512,14 +511,38 @@ const PrivacyKeyboard = Keyboard.inlineKeyboard([
 // ============== HELPER ==============
 
 function getUserId(ctx: any): number | null {
-  const sender = ctx.sender || ctx.from || ctx.message?.sender || ctx.callback_query?.sender;
+  // Для message_created
+  let sender = ctx.sender || ctx.from || ctx.message?.sender;
   if (sender?.user_id) return sender.user_id;
   if (sender?.id) return sender.id;
+  
+  // Для callback_query (структура MAX API)
+  if (ctx.callback_query) {
+    sender = ctx.callback_query.sender || ctx.callback_query.from || ctx.callback_query.user;
+    if (sender?.user_id) return sender.user_id;
+    if (sender?.id) return sender.id;
+  }
+  
+  // Прямой доступ к user_id
+  if (ctx.user_id) return ctx.user_id;
+  if (ctx.user?.user_id) return ctx.user.user_id;
+  if (ctx.user?.id) return ctx.user.id;
+  
+  log('WARN', 'Could not get user ID from context', { 
+    hasSender: !!ctx.sender,
+    hasFrom: !!ctx.from,
+    hasMessage: !!ctx.message,
+    hasCallbackQuery: !!ctx.callback_query,
+  });
+  
   return null;
 }
 
 function getUserData(ctx: any): any {
-  const sender = ctx.sender || ctx.from || ctx.message?.sender || ctx.callback_query?.sender;
+  let sender = ctx.sender || ctx.from || ctx.message?.sender;
+  if (ctx.callback_query) {
+    sender = ctx.callback_query.sender || ctx.callback_query.from || sender;
+  }
   return {
     username: sender?.username || '',
     firstName: sender?.first_name || sender?.name || '',
@@ -531,9 +554,10 @@ function getUserData(ctx: any): any {
 
 bot.on('bot_started', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `bot_started event, userId: ${id}`);
+
   if (!id) return;
 
-  log('INFO', `User ${id} started bot (bot_started event)`);
   await getOrCreateUser(id, getUserData(ctx));
 
   if (!(await hasUserConsent(id))) {
@@ -548,9 +572,10 @@ bot.on('bot_started', async (ctx) => {
 
 bot.command('start', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `/start command, userId: ${id}`);
+
   if (!id) return;
 
-  log('INFO', `User ${id} used /start command`);
   await getOrCreateUser(id, getUserData(ctx));
 
   if (!(await hasUserConsent(id))) {
@@ -564,21 +589,30 @@ bot.command('start', async (ctx) => {
 bot.command('patient', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
+
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
+
   ctx.reply(PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
 });
 
-// /waitlist - Лист ожидания
 bot.command('waitlist', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `/waitlist command, userId: ${id}`);
+  
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
+
   if (!(await hasUserConsent(id))) {
+    log('INFO', `User ${id} has no consent, showing consent message`);
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
+
+  log('INFO', `User ${id} starting waitlist flow`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
   ctx.reply('Напишите имя:', { attachments: [CancelKeyboard] });
@@ -587,34 +621,49 @@ bot.command('waitlist', async (ctx) => {
 bot.command('order', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
+
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
+
   ctx.reply(ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
-// /question - Задать вопрос
 bot.command('question', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `/question command, userId: ${id}`);
+  
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
+
   if (!(await hasUserConsent(id))) {
+    log('INFO', `User ${id} has no consent, showing consent message`);
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
+
+  log('INFO', `User ${id} starting question flow`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
   ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
 });
 
-// /feldsher - Анкета фельдшера
 bot.command('feldsher', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `/feldsher command, userId: ${id}`);
+  
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
+
   if (!(await hasUserConsent(id))) {
+    log('INFO', `User ${id} has no consent, showing consent message`);
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
+
+  log('INFO', `User ${id} starting feldsher flow`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
   ctx.reply('Как вас зовут?', { attachments: [CancelKeyboard] });
@@ -623,26 +672,33 @@ bot.command('feldsher', async (ctx) => {
 bot.command('doveren', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
+
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
+
   ctx.reply(DOVEREN_MESSAGE, { attachments: [BackKeyboard] });
 });
 
 bot.command('podderzhka', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
+
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
+
   ctx.reply(PODDERZHKA_MESSAGE, { attachments: [PodderzhkaKeyboard] });
 });
 
 bot.command('revoke', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
   await setUserState(id, 'revoke', 'confirm', {});
   ctx.reply(REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
@@ -678,46 +734,91 @@ bot.command('admin_stats', async (ctx) => {
 
 // ============== CALLBACK HANDLERS ==============
 
+// Согласие
 bot.action('consent_yes', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `consent_yes callback, userId: ${id}`);
+  
   if (!id) return;
+
   await getOrCreateUser(id, getUserData(ctx));
   await setUserConsent(id, true);
   securityLog('CONSENT_GRANTED', id);
+  
   await ctx.reply('✅ Спасибо за согласие! Теперь вы можете пользоваться ботом.', { attachments: [MainKeyboard] });
 });
 
 bot.action('consent_no', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `consent_no callback, userId: ${id}`);
+  
   if (!id) return;
+  
   securityLog('CONSENT_DENIED', id);
   await ctx.reply('❌ Без согласия функционал бота недоступен. Напишите /start чтобы попробовать снова.');
 });
 
+// Главное меню
 bot.action('main_menu', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `main_menu callback, userId: ${id}`);
+  
   if (!id) return;
+  
   await clearUserState(id);
   await ctx.reply(WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
 
+// Отмена
 bot.action('cancel_flow', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `cancel_flow callback, userId: ${id}`);
+  
   if (!id) return;
+  
   await clearUserState(id);
   await ctx.reply('❌ Отменено.', { attachments: [MainKeyboard] });
 });
 
+// ========== MENU PATIENT ==========
 bot.action('menu_patient', async (ctx) => {
   const id = getUserId(ctx);
-  if (!id) return;
+  log('INFO', `menu_patient callback, userId: ${id}`);
+  
+  if (!id) {
+    log('ERROR', 'menu_patient: could not get user ID');
+    return;
+  }
+
+  await getOrCreateUser(id, getUserData(ctx));
+
+  if (!(await hasUserConsent(id))) {
+    log('INFO', `menu_patient: user ${id} has no consent`);
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+  }
+
   await clearUserState(id);
   await ctx.reply(PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
 });
 
+// ========== PATIENT WAITLIST ==========
 bot.action('patient_waitlist', async (ctx) => {
   const id = getUserId(ctx);
-  if (!id) return;
+  log('INFO', `patient_waitlist callback, userId: ${id}`);
+  
+  if (!id) {
+    log('ERROR', 'patient_waitlist: could not get user ID');
+    return;
+  }
+
+  await getOrCreateUser(id, getUserData(ctx));
+
+  if (!(await hasUserConsent(id))) {
+    log('INFO', `patient_waitlist: user ${id} has no consent`);
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+  }
+
+  log('INFO', `Starting waitlist flow for user ${id}`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
   await ctx.reply('Напишите имя:', { attachments: [CancelKeyboard] });
@@ -729,29 +830,74 @@ bot.action('patient_order', async (ctx) => {
   await ctx.reply(ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
+// ========== MENU QUESTION ==========
 bot.action('menu_question', async (ctx) => {
   const id = getUserId(ctx);
-  if (!id) return;
+  log('INFO', `menu_question callback, userId: ${id}`);
+  
+  if (!id) {
+    log('ERROR', 'menu_question: could not get user ID');
+    return;
+  }
+
+  await getOrCreateUser(id, getUserData(ctx));
+
+  if (!(await hasUserConsent(id))) {
+    log('INFO', `menu_question: user ${id} has no consent`);
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+  }
+
   await clearUserState(id);
   await ctx.reply(QUESTION_MENU_MESSAGE, { attachments: [QuestionKeyboard] });
 });
 
+// ========== QUESTION ASK ==========
 bot.action('question_ask', async (ctx) => {
   const id = getUserId(ctx);
-  if (!id) return;
+  log('INFO', `question_ask callback, userId: ${id}`);
+  
+  if (!id) {
+    log('ERROR', 'question_ask: could not get user ID');
+    return;
+  }
+
+  await getOrCreateUser(id, getUserData(ctx));
+
+  if (!(await hasUserConsent(id))) {
+    log('INFO', `question_ask: user ${id} has no consent`);
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+  }
+
+  log('INFO', `Starting question flow for user ${id}`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
   await ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
 });
 
+// ========== MENU FELDSHER ==========
 bot.action('menu_feldsher', async (ctx) => {
   const id = getUserId(ctx);
-  if (!id) return;
+  log('INFO', `menu_feldsher callback, userId: ${id}`);
+  
+  if (!id) {
+    log('ERROR', 'menu_feldsher: could not get user ID');
+    return;
+  }
+
+  await getOrCreateUser(id, getUserData(ctx));
+
+  if (!(await hasUserConsent(id))) {
+    log('INFO', `menu_feldsher: user ${id} has no consent`);
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+  }
+
+  log('INFO', `Starting feldsher flow for user ${id}`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
   await ctx.reply('Как вас зовут?', { attachments: [CancelKeyboard] });
 });
 
+// ========== INFO PAGES ==========
 bot.action('menu_doveren', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -776,6 +922,7 @@ bot.action('menu_channels', async (ctx) => {
   await ctx.reply(CHANNELS_MESSAGE, { attachments: [ChannelsKeyboard] });
 });
 
+// ========== REVOKE ==========
 bot.action('menu_revoke', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -799,9 +946,11 @@ bot.action('revoke_no', async (ctx) => {
   await ctx.reply('✅ Данные сохранены.', { attachments: [MainKeyboard] });
 });
 
-// Выбор района (waitlist)
+// ========== DISTRICT SELECTION ==========
 bot.action(/district_(\d)/, async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `district callback, userId: ${id}, match: ${ctx.match}`);
+  
   if (!id) return;
 
   const districtId = ctx.match?.[1];
@@ -813,14 +962,13 @@ bot.action(/district_(\d)/, async (ctx) => {
 
   const state = await getUserState(id);
   if (!state || state.flowType !== 'waitlist') {
-    return ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+    return ctx.reply('Ошибка. Начните заново через /waitlist', { attachments: [MainKeyboard] });
   }
 
   const stateData = state.data;
   stateData.district = district.name;
   await setUserState(id, 'waitlist', 'preview', stateData);
 
-  // Показываем предварительный просмотр
   const preview = `📋 Проверьте ваши данные:
 
 👤 Имя: ${escapeHtml(stateData.name)}
@@ -830,14 +978,16 @@ bot.action(/district_(\d)/, async (ctx) => {
   await ctx.reply(preview, { attachments: [ConfirmKeyboard] });
 });
 
-// Выбор графика (feldsher)
+// ========== SCHEDULE SELECTION ==========
 bot.action('schedule_16', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `schedule_16 callback, userId: ${id}`);
+  
   if (!id) return;
 
   const state = await getUserState(id);
   if (!state || state.flowType !== 'feldsher') {
-    return ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+    return ctx.reply('Ошибка. Начните заново через /feldsher', { attachments: [MainKeyboard] });
   }
 
   const stateData = state.data;
@@ -849,11 +999,13 @@ bot.action('schedule_16', async (ctx) => {
 
 bot.action('schedule_12', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `schedule_12 callback, userId: ${id}`);
+  
   if (!id) return;
 
   const state = await getUserState(id);
   if (!state || state.flowType !== 'feldsher') {
-    return ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+    return ctx.reply('Ошибка. Начните заново через /feldsher', { attachments: [MainKeyboard] });
   }
 
   const stateData = state.data;
@@ -863,9 +1015,11 @@ bot.action('schedule_12', async (ctx) => {
   await ctx.reply('Ссылка на ваше резюме или опишите свой опыт кратко в произвольной форме:', { attachments: [CancelKeyboard] });
 });
 
-// Подтверждение отправки
+// ========== CONFIRM SEND ==========
 bot.action('confirm_send', async (ctx) => {
   const id = getUserId(ctx);
+  log('INFO', `confirm_send callback, userId: ${id}`);
+  
   if (!id) return;
 
   const state = await getUserState(id);
@@ -921,16 +1075,22 @@ bot.on('message_created', async (ctx) => {
   const id = getUserId(ctx);
   const text = ctx.message?.body?.text || ctx.message?.text;
 
+  log('INFO', `message_created, userId: ${id}, text: ${text}`);
+
   if (!id || !text) return;
 
-  log('INFO', `Message from user ${id}: ${text}`);
-
-  if (!(await hasUserConsent(id))) {
+  // Проверка согласия
+  const hasConsent = await hasUserConsent(id);
+  log('INFO', `User ${id} consent status: ${hasConsent}`);
+  
+  if (!hasConsent) {
     await ctx.reply('Пожалуйста, используйте кнопки для выбора.', { attachments: [ConsentKeyboard] });
     return;
   }
 
   const state = await getUserState(id);
+  log('INFO', `User ${id} state:`, state);
+  
   const sanitizedText = sanitizeInput(text, state?.flowType === 'question' && state?.currentStep === 'question' ? MAX_QUESTION_LENGTH : MAX_INPUT_LENGTH);
 
   if (!state) {
@@ -942,6 +1102,8 @@ bot.on('message_created', async (ctx) => {
 
   // ========== WAITLIST FLOW ==========
   if (state.flowType === 'waitlist') {
+    log('INFO', `Waitlist flow, step: ${state.currentStep}`);
+    
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'waitlist', 'phone', stateData);
@@ -959,6 +1121,8 @@ bot.on('message_created', async (ctx) => {
 
   // ========== FELDSHER FLOW ==========
   if (state.flowType === 'feldsher') {
+    log('INFO', `Feldsher flow, step: ${state.currentStep}`);
+    
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'feldsher', 'phone', stateData);
@@ -984,7 +1148,6 @@ bot.on('message_created', async (ctx) => {
       stateData.resumeLink = sanitizedText;
       await setUserState(id, 'feldsher', 'preview', stateData);
 
-      // Показываем предварительный просмотр
       const preview = `👨‍⚕️ Проверьте ваши данные:
 
 👤 Имя: ${escapeHtml(stateData.name)}
@@ -999,6 +1162,8 @@ bot.on('message_created', async (ctx) => {
 
   // ========== QUESTION FLOW ==========
   if (state.flowType === 'question') {
+    log('INFO', `Question flow, step: ${state.currentStep}`);
+    
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'question', 'phone', stateData);
@@ -1016,7 +1181,6 @@ bot.on('message_created', async (ctx) => {
       stateData.question = sanitizedText;
       await setUserState(id, 'question', 'preview', stateData);
 
-      // Показываем предварительный просмотр
       const preview = `❓ Проверьте ваши данные:
 
 👤 Имя: ${escapeHtml(stateData.name)}
@@ -1047,7 +1211,7 @@ async function startHttpServer(port: number) {
         return new Response(JSON.stringify({
           status: 'ok',
           bot: 'FeldsherRyadomBot for MAX',
-          version: '6.0',
+          version: '7.0',
           adminId: ADMIN_ID,
           channelId: CHANNEL_ID,
           time: new Date().toISOString()
@@ -1070,7 +1234,7 @@ async function startHttpServer(port: number) {
 
 async function main() {
   log('INFO', 'FeldsherRyadomBot for MAX starting...');
-  console.log('🤖 FeldsherRyadomBot for MAX v6.0 starting...');
+  console.log('🤖 FeldsherRyadomBot for MAX v7.0 starting...');
   console.log(`📋 Admin ID: ${ADMIN_ID}`);
   console.log(`📢 Channel ID: ${CHANNEL_ID}`);
 
