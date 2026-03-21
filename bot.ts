@@ -1,7 +1,14 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 7.0 - Fixed callback handlers and consent flow
+ * Version: 9.0
+ * 
+ * Исправления в v9.0:
+ * - Реализован Middleware для проверки согласия (один раз для всех запросов)
+ * - Убраны дублирующие проверки согласия из команд
+ * - Обновлен текст согласия на новый
+ * - Обновлены ссылки на каналы
+ * 
  * Repository: https://github.com/avanaha/feldsher-max-bot
  */
 
@@ -76,11 +83,11 @@ const BOT_CONFIG = {
   channelId: CHANNEL_ID,
   port: parseInt(process.env.PORT || '8080'),
   feldsherChannelLink: 'https://max.ru/join/rre51qvmREhGKRnNFf4vcVZ_U3mj_obCY8L2wNHAxo8',
-  patientChannelLink: 'https://max.ru/join/TL81d4e3h5J-_txDDk7T0d_pa_kPUduvCNH5cg4aqzg',
+  patientChannelLink: 'https://max.ru/join/56sp6ngnZou3IeaUAUqfiopUefYBUMacUwg1ExkHAa8',
   planetaLink: 'https://planeta.ru/campaigns/feldsherryadom',
   sberLink: 'https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM',
   supportPhone: '+7 (965) 843-78-18',
-  privacyLink: 'https://feldsher-land.ru/legal',
+  privacyLink: 'https://feldsher-land.ru/privacy',
   vkPatientLink: 'https://vk.com/feldsherryadom',
   vkFeldsherLink: 'https://vk.com/feldsherizh',
   districts: [
@@ -312,10 +319,11 @@ function validateExperience(text: string): boolean {
 
 const CONSENT_MESSAGE = `✅ СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСОНАЛЬНЫХ ДАННЫХ
 
-Я, заполняя форму в боте @id1800048162_1_bot (https://max.ru/id1800048162_1_bot), даю своё добровольное и информированное согласие
+Я, заполняя форму в боте по ссылке в интернете https://max.ru/id1800048162_1_bot, даю своё добровольное и информированное согласие
 Обществу с ограниченной ответственностью «Фельдшер и компания»
-(ООО «Фельдшер и Ко», ИНН 1800048162, ОГРН 1261800002694, юридический адрес: 426000, РФ, Удмуртская Республика, г. Ижевск)
-на обработку моих персональных данных, которые я укажу далее (имя, номер телефона, предпочитаемый район обслуживания, сведения об опыте работы, ссылка на резюме), с целями:
+(ООО «Фельдшер и Ко», ИНН 1800048162, ОГРН 1261800002694,
+юридический адрес: 426000, РФ, Удмуртская Республика, г. Ижевск)
+на обработку моих персональных данных, которые я укажу далее (имя, номер телефона, район проживания, сведения об опыте работы, ссылка на резюме), с целями:
 – формирования листа ожидания открытия фельдшерского кабинета;
 – связи со мной по вопросам проекта;
 – рассмотрения моей кандидатуры в качестве фельдшера (для соискателей);
@@ -323,17 +331,12 @@ const CONSENT_MESSAGE = `✅ СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСО
 
 Обработка включает в себя (в соответствии с п. 3 ст. 3 Федерального закона № 152-ФЗ): сбор, запись, систематизацию, накопление, хранение, уточнение (обновление, изменение), извлечение, использование, передачу (в целях, указанных выше), обезличивание, блокирование, удаление, уничтожение персональных данных.
 
-Я ознакомлен(а) с Политикой конфиденциальности Оператора – она доступна по команде /privacy в этом боте, а также в закреплённых сообщениях каналов в «Макс» и ВКонтакте, и на сайте https://feldsher-land.ru/legal.html
+Я ознакомлен(а) с Политикой конфиденциальности Оператора – она доступна по команде /privacy в этом боте, а также в закреплённых сообщениях каналов в «Макс» и ВКонтакте, и на сайте https://feldsher-land.ru/privacy.
 
-Срок действия согласия: с момента его предоставления до достижения целей обработки либо до момента отзыва согласия субъектом.
-Я могу отозвать это согласие в любой момент, написав об этом в данного бота (например, отправив сообщение с текстом «Отозвать согласие»), либо по электронной почте feldland@yandex.ru. Отзыв согласия не имеет обратной силы в части уже обработанных данных.
+Срок действия согласия: с момента его предоставления до достижения целей обработки либо до момента отзыва согласия субъектом. Я могу отозвать это согласие в любой момент, написав об этом в данного бота (например, отправив сообщение с текстом «Отозвать согласие»), либо по электронной почте feldland@yandex.ru. Отзыв согласия не имеет обратной силы в части уже обработанных данных.
 
-✅ Согласен (-на).
-Ваш выбор означает, что вы прочитали условия и подтверждаете своё согласие на эти условия.
-
-❌ Не согласен (-на).
-Ваш выбор означает, что вы прочитали условия и не подтверждаете своё согласие на эти условия.
-В этом случае, функционал бота будет вам недоступен.`;
+Нажимая кнопку «✅ Согласен», я подтверждаю, что прочитал(а) и принимаю условия выше.
+Если вы не согласны, нажмите «❌ Не согласен» – в этом случае вы не сможете пользоваться ботом.`;
 
 const WELCOME_MESSAGE = `👋 Здравствуйте! Я бот проекта «Фельдшеръ.Рядом».
 
@@ -365,7 +368,7 @@ const PRIVACY_MESSAGE = `🔐 СВОД ПРАВИЛ
 Политика конфиденциальности и согласие на обработку персональных данных по ссылкам ниже:
 
 📄 Политика конфиденциальности находится по ссылке:
-https://feldsher-land.ru/legal
+https://feldsher-land.ru/privacy
 
 🔐 Согласие на обработку персональных данных:
 Действует для этого бота, его нужно принять перед использованием бота.`;
@@ -377,7 +380,7 @@ const CHANNELS_MESSAGE = `📢 НАШИ КАНАЛЫ
 Пациентам:
 
 🟪 MAX
-https://max.ru/join/TL81d4e3h5J-_txDDk7T0d_pa_kPUduvCNH5cg4aqzg
+https://max.ru/join/56sp6ngnZou3IeaUAUqfiopUefYBUMacUwg1ExkHAa8
 
 🔵 VK
 https://vk.com/feldsherryadom
@@ -428,8 +431,8 @@ const QUESTION_MENU_MESSAGE = `❓ ВОПРОСЫ
 // ============== KEYBOARDS ==============
 
 const ConsentKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('✅ Согласен (-на)', 'consent_yes')],
-  [Keyboard.button.callback('❌ Не согласен (-на)', 'consent_no')],
+  [Keyboard.button.callback('✅ Согласен', 'consent_yes')],
+  [Keyboard.button.callback('❌ Не согласен', 'consent_no')],
 ]);
 
 const MainKeyboard = Keyboard.inlineKeyboard([
@@ -550,6 +553,51 @@ function getUserData(ctx: any): any {
   };
 }
 
+// ============== MIDDLEWARE - ПРОВЕРКА СОГЛАСИЯ ==============
+
+bot.use(async (ctx, next) => {
+  const id = getUserId(ctx);
+  
+  // Если не удалось получить ID - пропускаем
+  if (!id) {
+    return next();
+  }
+
+  // Получаем callback_data если это callback
+  const callbackData = ctx.callback_query?.payload || ctx.callback?.payload || '';
+  
+  // Разрешаем обработку согласия без проверки
+  if (callbackData === 'consent_yes' || callbackData === 'consent_no' || callbackData === 'consent_retry') {
+    return next();
+  }
+
+  // Создаём/получаем пользователя
+  await getOrCreateUser(id, getUserData(ctx));
+
+  // Проверяем согласие
+  const hasConsent = await hasUserConsent(id);
+  
+  if (!hasConsent) {
+    log('INFO', `Middleware: User ${id} has no consent, showing consent message`);
+    
+    // Для callback отвечаем и показываем согласие
+    if (ctx.callback_query || ctx.callback) {
+      try {
+        await ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+      } catch (e) {
+        log('ERROR', 'Middleware callback reply error', e);
+      }
+      return;
+    }
+    
+    // Для обычных сообщений
+    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+  }
+
+  // Согласие есть - пропускаем дальше
+  return next();
+});
+
 // ============== BOT STARTED ==============
 
 bot.on('bot_started', async (ctx) => {
@@ -558,12 +606,7 @@ bot.on('bot_started', async (ctx) => {
 
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие, просто показываем меню
   await clearUserState(id);
   ctx.reply(WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
@@ -576,12 +619,7 @@ bot.command('start', async (ctx) => {
 
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   await clearUserState(id);
   ctx.reply(WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
@@ -590,12 +628,7 @@ bot.command('patient', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   ctx.reply(PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
 });
 
@@ -605,13 +638,7 @@ bot.command('waitlist', async (ctx) => {
   
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `User ${id} has no consent, showing consent message`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие - сразу начинаем анкету
   log('INFO', `User ${id} starting waitlist flow`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
@@ -622,12 +649,7 @@ bot.command('order', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   ctx.reply(ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
@@ -637,13 +659,7 @@ bot.command('question', async (ctx) => {
   
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `User ${id} has no consent, showing consent message`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие - сразу начинаем анкету
   log('INFO', `User ${id} starting question flow`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
@@ -656,13 +672,7 @@ bot.command('feldsher', async (ctx) => {
   
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `User ${id} has no consent, showing consent message`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие - сразу начинаем анкету
   log('INFO', `User ${id} starting feldsher flow`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
@@ -673,12 +683,7 @@ bot.command('doveren', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   ctx.reply(DOVEREN_MESSAGE, { attachments: [BackKeyboard] });
 });
 
@@ -686,12 +691,7 @@ bot.command('podderzhka', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   ctx.reply(PODDERZHKA_MESSAGE, { attachments: [PodderzhkaKeyboard] });
 });
 
@@ -699,7 +699,6 @@ bot.command('revoke', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
   await setUserState(id, 'revoke', 'confirm', {});
   ctx.reply(REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
 });
@@ -758,6 +757,14 @@ bot.action('consent_no', async (ctx) => {
   await ctx.reply('❌ Без согласия функционал бота недоступен. Напишите /start чтобы попробовать снова.');
 });
 
+// Повторная попытка согласия
+bot.action('consent_retry', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  
+  await ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
+});
+
 // Главное меню
 bot.action('main_menu', async (ctx) => {
   const id = getUserId(ctx);
@@ -785,18 +792,9 @@ bot.action('menu_patient', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `menu_patient callback, userId: ${id}`);
   
-  if (!id) {
-    log('ERROR', 'menu_patient: could not get user ID');
-    return;
-  }
+  if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `menu_patient: user ${id} has no consent`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   await clearUserState(id);
   await ctx.reply(PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
 });
@@ -806,18 +804,9 @@ bot.action('patient_waitlist', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `patient_waitlist callback, userId: ${id}`);
   
-  if (!id) {
-    log('ERROR', 'patient_waitlist: could not get user ID');
-    return;
-  }
+  if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `patient_waitlist: user ${id} has no consent`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   log('INFO', `Starting waitlist flow for user ${id}`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
@@ -835,18 +824,9 @@ bot.action('menu_question', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `menu_question callback, userId: ${id}`);
   
-  if (!id) {
-    log('ERROR', 'menu_question: could not get user ID');
-    return;
-  }
+  if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `menu_question: user ${id} has no consent`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   await clearUserState(id);
   await ctx.reply(QUESTION_MENU_MESSAGE, { attachments: [QuestionKeyboard] });
 });
@@ -856,18 +836,9 @@ bot.action('question_ask', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `question_ask callback, userId: ${id}`);
   
-  if (!id) {
-    log('ERROR', 'question_ask: could not get user ID');
-    return;
-  }
+  if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `question_ask: user ${id} has no consent`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   log('INFO', `Starting question flow for user ${id}`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
@@ -879,18 +850,9 @@ bot.action('menu_feldsher', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `menu_feldsher callback, userId: ${id}`);
   
-  if (!id) {
-    log('ERROR', 'menu_feldsher: could not get user ID');
-    return;
-  }
+  if (!id) return;
 
-  await getOrCreateUser(id, getUserData(ctx));
-
-  if (!(await hasUserConsent(id))) {
-    log('INFO', `menu_feldsher: user ${id} has no consent`);
-    return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-  }
-
+  // Middleware уже проверил согласие
   log('INFO', `Starting feldsher flow for user ${id}`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
@@ -1079,14 +1041,7 @@ bot.on('message_created', async (ctx) => {
 
   if (!id || !text) return;
 
-  // Проверка согласия
-  const hasConsent = await hasUserConsent(id);
-  log('INFO', `User ${id} consent status: ${hasConsent}`);
-  
-  if (!hasConsent) {
-    await ctx.reply('Пожалуйста, используйте кнопки для выбора.', { attachments: [ConsentKeyboard] });
-    return;
-  }
+  // Middleware уже проверил согласие
 
   const state = await getUserState(id);
   log('INFO', `User ${id} state:`, state);
@@ -1211,7 +1166,7 @@ async function startHttpServer(port: number) {
         return new Response(JSON.stringify({
           status: 'ok',
           bot: 'FeldsherRyadomBot for MAX',
-          version: '7.0',
+          version: '9.0',
           adminId: ADMIN_ID,
           channelId: CHANNEL_ID,
           time: new Date().toISOString()
@@ -1234,7 +1189,7 @@ async function startHttpServer(port: number) {
 
 async function main() {
   log('INFO', 'FeldsherRyadomBot for MAX starting...');
-  console.log('🤖 FeldsherRyadomBot for MAX v7.0 starting...');
+  console.log('🤖 FeldsherRyadomBot for MAX v9.0 starting...');
   console.log(`📋 Admin ID: ${ADMIN_ID}`);
   console.log(`📢 Channel ID: ${CHANNEL_ID}`);
 
@@ -1271,19 +1226,14 @@ async function main() {
     console.log('⚠️ Could not set bot commands');
   }
 
-  log('INFO', 'Starting bot with polling...');
-  console.log('🔄 Starting bot with polling...');
-
-  bot.start();
-
-  log('INFO', 'Bot started successfully');
-  console.log('✅ Bot started successfully!');
+  log('INFO', 'Bot starting polling...');
+  console.log('🚀 Bot starting polling...');
+  
+  await bot.start();
 }
 
 main().catch((err) => {
   log('ERROR', 'Fatal error', err);
-  console.error(err);
+  console.error('Fatal error:', err);
+  process.exit(1);
 });
-
-process.once('SIGINT', () => bot.stop());
-process.once('SIGTERM', () => bot.stop());
