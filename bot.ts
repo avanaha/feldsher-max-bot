@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 5.0 - Button-only navigation (fixed keyboard API)
+ * Version: 6.0 - Preview confirmation before sending
  * Repository: https://github.com/avanaha/feldsher-max-bot
  */
 
@@ -90,10 +90,6 @@ const BOT_CONFIG = {
     { id: '4', name: 'Первомайский' },
     { id: '5', name: 'Устиновский' },
   ],
-  scheduleOptions: {
-    '1': '16 смен',
-    '2': '12 смен',
-  },
 };
 
 if (!BOT_CONFIG.token) {
@@ -281,8 +277,18 @@ async function sendNotification(type: string, data: any) {
 // ============== VALIDATION ==============
 
 function validatePhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, '');
+  // Проверяем: код страны (7 или 8) + 10 цифр = 11 цифр всего
+  // Или просто 10 цифр (без кода страны)
+  if (digits.length === 11 && (digits.startsWith('7') || digits.startsWith('8'))) {
+    return true;
+  }
+  if (digits.length === 10) {
+    return true;
+  }
+  // Также проверяем формат с + и разделителями
   const cleaned = phone.replace(/\s/g, '');
-  return /^[\+]?[0-9][0-9\-\s]{9,15}$/.test(cleaned);
+  return /^\+?[0-9][0-9\-\s]{9,15}$/.test(cleaned);
 }
 
 function formatPhone(phone: string): string {
@@ -291,6 +297,13 @@ function formatPhone(phone: string): string {
   if (digits.startsWith('7') && digits.length === 11) return '+' + digits;
   if (digits.length === 10) return '+7' + digits;
   return phone;
+}
+
+function validateExperience(text: string): boolean {
+  const digits = text.replace(/\D/g, '');
+  if (digits.length === 0) return false;
+  const num = parseInt(digits);
+  return num >= 0 && num <= 100;
 }
 
 // ============== MESSAGES ==============
@@ -357,7 +370,7 @@ https://feldsher-land.ru/legal
 
 const CHANNELS_MESSAGE = `📢 НАШИ КАНАЛЫ
 
-Друзья, вы можете подписаться на наши каналы по ссылкам ниже:
+Друзья, вы можете подписиться на наши каналы по ссылкам ниже:
 
 Пациентам:
 
@@ -410,22 +423,6 @@ const QUESTION_MENU_MESSAGE = `❓ ВОПРОСЫ
 
 Выберите действие:`;
 
-const DISTRICT_MESSAGE = `📍 ВЫБОР РАЙОНА
-
-В каком районе вы планируете посещать кабинет?`;
-
-const SCHEDULE_MESSAGE = `📅 ВЫБОР ГРАФИКА
-
-У нас сменный режим работы по 5 часов.
-
-Вариант 1 (16 смен за 4 недели):
-16 будничных дней (по 4 дня в неделю) – распределение смен: 5 утренних (07:00–12:00), 6 дневных (12:00–17:00), 5 вечерних (16:00–21:00).
-
-Вариант 2 (12 смен за 4 недели):
-1 утренняя + 1 вечерняя в будни; 1 дневная каждое воскресенье.
-
-Какой формат вам подходит?`;
-
 // ============== KEYBOARDS ==============
 
 const ConsentKeyboard = Keyboard.inlineKeyboard([
@@ -460,19 +457,28 @@ const CancelKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
 ]);
 
-const DistrictKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('1. Индустриальный', 'district_1')],
-  [Keyboard.button.callback('2. Ленинский', 'district_2')],
-  [Keyboard.button.callback('3. Октябрьский', 'district_3')],
-  [Keyboard.button.callback('4. Первомайский', 'district_4')],
-  [Keyboard.button.callback('5. Устиновский', 'district_5')],
-  [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+// Районы для листа ожидания
+function getDistrictKeyboard() {
+  return Keyboard.inlineKeyboard([
+    [Keyboard.button.callback('1. Индустриальный', 'district_1')],
+    [Keyboard.button.callback('2. Ленинский', 'district_2')],
+    [Keyboard.button.callback('3. Октябрьский', 'district_3')],
+    [Keyboard.button.callback('4. Первомайский', 'district_4')],
+    [Keyboard.button.callback('5. Устиновский', 'district_5')],
+  ]);
+}
+
+// График для фельдшера
+const ScheduleKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('16 смен (основной фельдшер)', 'schedule_16')],
+  [Keyboard.button.callback('12 смен (воскресный фельдшер)', 'schedule_12')],
 ]);
 
-const ScheduleKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('Вариант 1 (16 смен)', 'schedule_1')],
-  [Keyboard.button.callback('Вариант 2 (12 смен)', 'schedule_2')],
-  [Keyboard.button.callback('❌ Отменить', 'cancel_flow')],
+// Клавиатура подтверждения
+const ConfirmKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('✅ Отправить', 'confirm_send')],
+  [Keyboard.button.callback('❌ Не отправлять', 'confirm_cancel')],
+  [Keyboard.button.callback('🏠 В главное меню', 'main_menu')],
 ]);
 
 const RevokeKeyboard = Keyboard.inlineKeyboard([
@@ -565,6 +571,7 @@ bot.command('patient', async (ctx) => {
   ctx.reply(PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
 });
 
+// /waitlist - Лист ожидания
 bot.command('waitlist', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -573,7 +580,8 @@ bot.command('waitlist', async (ctx) => {
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
   await setUserState(id, 'waitlist', 'name', {});
-  ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
+  securityLog('WAITLIST_START', id);
+  ctx.reply('Напишите имя:', { attachments: [CancelKeyboard] });
 });
 
 bot.command('order', async (ctx) => {
@@ -586,6 +594,7 @@ bot.command('order', async (ctx) => {
   ctx.reply(ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
+// /question - Задать вопрос
 bot.command('question', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -593,9 +602,12 @@ bot.command('question', async (ctx) => {
   if (!(await hasUserConsent(id))) {
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
-  ctx.reply(QUESTION_MENU_MESSAGE, { attachments: [QuestionKeyboard] });
+  await setUserState(id, 'question', 'name', {});
+  securityLog('QUESTION_START', id);
+  ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
 });
 
+// /feldsher - Анкета фельдшера
 bot.command('feldsher', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -604,6 +616,7 @@ bot.command('feldsher', async (ctx) => {
     return ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
   }
   await setUserState(id, 'feldsher', 'name', {});
+  securityLog('FELDSHER_START', id);
   ctx.reply('Как вас зовут?', { attachments: [CancelKeyboard] });
 });
 
@@ -707,7 +720,7 @@ bot.action('patient_waitlist', async (ctx) => {
   if (!id) return;
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
-  await ctx.reply('Напишите ваше имя:', { attachments: [CancelKeyboard] });
+  await ctx.reply('Напишите имя:', { attachments: [CancelKeyboard] });
 });
 
 bot.action('patient_order', async (ctx) => {
@@ -786,6 +799,7 @@ bot.action('revoke_no', async (ctx) => {
   await ctx.reply('✅ Данные сохранены.', { attachments: [MainKeyboard] });
 });
 
+// Выбор района (waitlist)
 bot.action(/district_(\d)/, async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -794,7 +808,7 @@ bot.action(/district_(\d)/, async (ctx) => {
   const district = BOT_CONFIG.districts.find(d => d.id === districtId);
 
   if (!district) {
-    return ctx.reply('Ошибка выбора района.', { attachments: [DistrictKeyboard] });
+    return ctx.reply('Ошибка выбора района.', { attachments: getDistrictKeyboard() });
   }
 
   const state = await getUserState(id);
@@ -804,31 +818,22 @@ bot.action(/district_(\d)/, async (ctx) => {
 
   const stateData = state.data;
   stateData.district = district.name;
+  await setUserState(id, 'waitlist', 'preview', stateData);
 
-  try {
-    await saveWaitlistEntry(id, stateData);
-    await sendNotification('waitlist', stateData);
-    securityLog('WAITLIST_SAVED', id, { district: district.name });
-    await clearUserState(id);
-    await ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Вы добавлены в лист ожидания.
+  // Показываем предварительный просмотр
+  const preview = `📋 Проверьте ваши данные:
 
-Как только откроем фельдшерский кабинет, мы свяжемся с вами.`, { attachments: [BackKeyboard] });
-  } catch (e) {
-    log('ERROR', 'Failed to save waitlist', e);
-    await ctx.reply('Ошибка сохранения. Попробуйте позже.', { attachments: [MainKeyboard] });
-  }
+👤 Имя: ${escapeHtml(stateData.name)}
+📞 Телефон: ${escapeHtml(stateData.phone)}
+📍 Район: ${escapeHtml(stateData.district)}`;
+
+  await ctx.reply(preview, { attachments: [ConfirmKeyboard] });
 });
 
-bot.action(/schedule_(\d)/, async (ctx) => {
+// Выбор графика (feldsher)
+bot.action('schedule_16', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-
-  const scheduleId = ctx.match?.[1];
-  const scheduleName = BOT_CONFIG.scheduleOptions[scheduleId as keyof typeof BOT_CONFIG.scheduleOptions];
-
-  if (!scheduleName) {
-    return ctx.reply('Ошибка выбора графика.', { attachments: [ScheduleKeyboard] });
-  }
 
   const state = await getUserState(id);
   if (!state || state.flowType !== 'feldsher') {
@@ -836,10 +841,78 @@ bot.action(/schedule_(\d)/, async (ctx) => {
   }
 
   const stateData = state.data;
-  stateData.scheduleType = scheduleName;
+  stateData.scheduleType = '16 смен (основной фельдшер)';
   await setUserState(id, 'feldsher', 'resume', stateData);
 
-  await ctx.reply('Ссылка на резюме (Google Docs, hh.ru) или краткое описание опыта. Если нет резюме, напишите "нет":', { attachments: [CancelKeyboard] });
+  await ctx.reply('Ссылка на ваше резюме или опишите свой опыт кратко в произвольной форме:', { attachments: [CancelKeyboard] });
+});
+
+bot.action('schedule_12', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+
+  const state = await getUserState(id);
+  if (!state || state.flowType !== 'feldsher') {
+    return ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+  }
+
+  const stateData = state.data;
+  stateData.scheduleType = '12 смен (воскресный фельдшер)';
+  await setUserState(id, 'feldsher', 'resume', stateData);
+
+  await ctx.reply('Ссылка на ваше резюме или опишите свой опыт кратко в произвольной форме:', { attachments: [CancelKeyboard] });
+});
+
+// Подтверждение отправки
+bot.action('confirm_send', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+
+  const state = await getUserState(id);
+  if (!state) {
+    return ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+  }
+
+  const stateData = state.data;
+
+  try {
+    if (state.flowType === 'waitlist') {
+      await saveWaitlistEntry(id, stateData);
+      await sendNotification('waitlist', stateData);
+      securityLog('WAITLIST_SAVED', id, { district: stateData.district });
+      await clearUserState(id);
+      return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}. Вы добавлены в лист ожидания.`, { attachments: [BackKeyboard] });
+    }
+
+    if (state.flowType === 'question') {
+      await saveQuestion(id, stateData);
+      await sendNotification('question', stateData);
+      securityLog('QUESTION_SAVED', id);
+      await clearUserState(id);
+      return ctx.reply(`✅ Спасибо за вопрос. Мы получили его и свяжемся с вами в ближайшее время.`, { attachments: [BackKeyboard] });
+    }
+
+    if (state.flowType === 'feldsher') {
+      await saveFeldsherApplication(id, stateData);
+      await sendNotification('feldsher', stateData);
+      securityLog('FELDSHER_SAVED', id);
+      await clearUserState(id);
+      return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}. Мы получили вашу анкету и свяжемся с вами в ближайшее время для назначения собеседования.`, { attachments: [BackKeyboard] });
+    }
+
+    await clearUserState(id);
+    await ctx.reply('Ошибка. Начните заново.', { attachments: [MainKeyboard] });
+  } catch (e) {
+    log('ERROR', 'Failed to save data', e);
+    await ctx.reply('Ошибка сохранения. Попробуйте позже.', { attachments: [MainKeyboard] });
+  }
+});
+
+bot.action('confirm_cancel', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await clearUserState(id);
+  await ctx.reply('❌ Данные не отправлены.', { attachments: [MainKeyboard] });
 });
 
 // ============== TEXT MESSAGE HANDLER ==============
@@ -867,83 +940,90 @@ bot.on('message_created', async (ctx) => {
 
   const stateData = state.data;
 
+  // ========== WAITLIST FLOW ==========
   if (state.flowType === 'waitlist') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'waitlist', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', { attachments: [CancelKeyboard] });
+      return ctx.reply('Ваш номер телефона (в формате: +7-9ххххххххх):', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', { attachments: [CancelKeyboard] });
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9ххххххххх:', { attachments: [CancelKeyboard] });
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'waitlist', 'district', stateData);
-      return ctx.reply(DISTRICT_MESSAGE, { attachments: [DistrictKeyboard] });
+      return ctx.reply('Выберите кнопкой предпочтительный район обслуживания:', { attachments: getDistrictKeyboard() });
     }
   }
 
+  // ========== FELDSHER FLOW ==========
   if (state.flowType === 'feldsher') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'feldsher', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', { attachments: [CancelKeyboard] });
+      return ctx.reply('Ваш номер телефона (в формате: +7-9ххххххххх):', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', { attachments: [CancelKeyboard] });
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9ххххххххх:', { attachments: [CancelKeyboard] });
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'feldsher', 'experience', stateData);
-      return ctx.reply('Ваш стаж работы (лет):', { attachments: [CancelKeyboard] });
+      return ctx.reply('Общий стаж работы фельдшером (лет):', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'experience') {
-      stateData.experience = sanitizedText;
+      if (!validateExperience(sanitizedText)) {
+        return ctx.reply('Пожалуйста, введите стаж цифрой (например: 5):', { attachments: [CancelKeyboard] });
+      }
+      stateData.experience = sanitizedText.replace(/\D/g, '');
       await setUserState(id, 'feldsher', 'schedule', stateData);
-      return ctx.reply(SCHEDULE_MESSAGE, { attachments: [ScheduleKeyboard] });
+      return ctx.reply('Какой график вы предпочитаете?', { attachments: [ScheduleKeyboard] });
     }
     if (state.currentStep === 'resume') {
-      stateData.resumeLink = sanitizedText.toLowerCase() === 'нет' ? '' : sanitizedText;
-      try {
-        await saveFeldsherApplication(id, stateData);
-        await sendNotification('feldsher', stateData);
-        securityLog('FELDSHER_SAVED', id);
-        await clearUserState(id);
-        return ctx.reply(`✅ Спасибо, ${escapeHtml(stateData.name)}! Ваша анкета передана администратору.
-Мы свяжемся с вами в ближайшее время.`, { attachments: [BackKeyboard] });
-      } catch (e) {
-        log('ERROR', 'Failed to save feldsher application', e);
-        return ctx.reply('Ошибка сохранения. Попробуйте позже.', { attachments: [MainKeyboard] });
-      }
+      stateData.resumeLink = sanitizedText;
+      await setUserState(id, 'feldsher', 'preview', stateData);
+
+      // Показываем предварительный просмотр
+      const preview = `👨‍⚕️ Проверьте ваши данные:
+
+👤 Имя: ${escapeHtml(stateData.name)}
+📞 Телефон: ${escapeHtml(stateData.phone)}
+⏳ Стаж: ${escapeHtml(stateData.experience)}
+📅 График: ${escapeHtml(stateData.scheduleType)}
+📎 Резюме: ${escapeHtml(stateData.resumeLink)}`;
+
+      return ctx.reply(preview, { attachments: [ConfirmKeyboard] });
     }
   }
 
+  // ========== QUESTION FLOW ==========
   if (state.flowType === 'question') {
     if (state.currentStep === 'name') {
       stateData.name = sanitizedText;
       await setUserState(id, 'question', 'phone', stateData);
-      return ctx.reply('Ваш номер телефона (в формате: +7-9xx-xxx-xx-xx):', { attachments: [CancelKeyboard] });
+      return ctx.reply('Напишите ваш номер телефона для связи (в формате: +7-9ххххххххх), чтобы мы могли вам ответить:', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'phone') {
       if (!validatePhone(sanitizedText)) {
-        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9xx-xxx-xx-xx:', { attachments: [CancelKeyboard] });
+        return ctx.reply('Неверный формат телефона. Введите номер в формате +7-9ххххххххх:', { attachments: [CancelKeyboard] });
       }
       stateData.phone = formatPhone(sanitizedText);
       await setUserState(id, 'question', 'question', stateData);
-      return ctx.reply('Напишите ваш вопрос о проекте или кабинете:', { attachments: [CancelKeyboard] });
+      return ctx.reply('Задайте ваш вопрос о будущем или действующем кабинете. Мы ответим вам в ближайшее время.', { attachments: [CancelKeyboard] });
     }
     if (state.currentStep === 'question') {
       stateData.question = sanitizedText;
-      try {
-        await saveQuestion(id, stateData);
-        await sendNotification('question', stateData);
-        securityLog('QUESTION_SAVED', id);
-        await clearUserState(id);
-        return ctx.reply(`✅ Спасибо за вопрос, ${escapeHtml(stateData.name)}! Мы получили его и свяжемся с вами в ближайшее время.`, { attachments: [BackKeyboard] });
-      } catch (e) {
-        log('ERROR', 'Failed to save question', e);
-        return ctx.reply('Ошибка сохранения. Попробуйте позже.', { attachments: [MainKeyboard] });
-      }
+      await setUserState(id, 'question', 'preview', stateData);
+
+      // Показываем предварительный просмотр
+      const preview = `❓ Проверьте ваши данные:
+
+👤 Имя: ${escapeHtml(stateData.name)}
+📞 Телефон: ${escapeHtml(stateData.phone)}
+💬 Вопрос: ${escapeHtml(stateData.question)}`;
+
+      return ctx.reply(preview, { attachments: [ConfirmKeyboard] });
     }
   }
 
@@ -967,7 +1047,7 @@ async function startHttpServer(port: number) {
         return new Response(JSON.stringify({
           status: 'ok',
           bot: 'FeldsherRyadomBot for MAX',
-          version: '5.0',
+          version: '6.0',
           adminId: ADMIN_ID,
           channelId: CHANNEL_ID,
           time: new Date().toISOString()
@@ -990,7 +1070,7 @@ async function startHttpServer(port: number) {
 
 async function main() {
   log('INFO', 'FeldsherRyadomBot for MAX starting...');
-  console.log('🤖 FeldsherRyadomBot for MAX v5.0 starting...');
+  console.log('🤖 FeldsherRyadomBot for MAX v6.0 starting...');
   console.log(`📋 Admin ID: ${ADMIN_ID}`);
   console.log(`📢 Channel ID: ${CHANNEL_ID}`);
 
