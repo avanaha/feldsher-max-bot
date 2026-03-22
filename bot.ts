@@ -1,21 +1,15 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 11.0
+ * Version: 11.2
  * 
- * Исправления в v11.0:
- * - ИСПРАВЛЕНО: getUserId() использует ctx.user (правильный способ для MAX API)
- * - ИСПРАВЛЕНО: callbackData получается через ctx.callback?.payload
- * - ИСПРАВЛЕНО: Тексты анкет согласно ТЗ
- * - ИСПРАВЛЕНО: Кнопки графика: "16 смен (основной фельдшер)" и "12 смен (воскресный фельдшер)"
- * - ДОБАВЛЕНО: Rate Limiting (мягкий, без блокировки активных анкет)
- * - ДОБАВЛЕНО: Валидация URL в поле "резюме"
- * - ДОБАВЛЕНО: Ротация логов (хранение 7 дней)
- * - ДОБАВЛЕНО: Шифрование номеров телефонов в БД
- * - ДОБАВЛЕНО: Уведомления админу о подозрительной активности
- * - ДОБАВЛЕНО: Регулярные бэкапы БД
- * - ДОБАВЛЕНО: Обработка chat.denied с очисткой данных
- * - УБРАНО: adminId и channelId из /health endpoint
+ * Исправления в v11.2:
+ * - ИСПРАВЛЕНО: Все тексты сообщений согласно ТЗ
+ * - ИСПРАВЛЕНО: Полный текст согласия на обработку ПД
+ * - ИСПРАВЛЕНО: Новое приветственное сообщение
+ * - ИСПРАВЛЕНО: Тексты всех команд (/order, /doveren, /podderzhka, /privacy, /channels, /revoke)
+ * - ИСПРАВЛЕНО: Кнопки отзыва согласия (Отозвать / Не отзывать)
+ * - СОХРАНЕНО: Все функции безопасности (Rate Limiting, шифрование, бэкапы, ротация логов)
  * 
  * Repository: https://github.com/avanaha/feldsher-max-bot
  */
@@ -42,7 +36,6 @@ if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
 
-// Ротация логов - удаление файлов старше 7 дней
 function rotateLogs() {
   try {
     const files = readdirSync(LOG_DIR);
@@ -64,7 +57,6 @@ function rotateLogs() {
   }
 }
 
-// Запускаем ротацию при старте и каждый день
 rotateLogs();
 setInterval(rotateLogs, 24 * 60 * 60 * 1000);
 
@@ -99,7 +91,7 @@ function decrypt(encryptedText: string): string {
   if (!encryptedText) return '';
   try {
     const parts = encryptedText.split(':');
-    if (parts.length !== 2) return encryptedText; // Не зашифровано
+    if (parts.length !== 2) return encryptedText;
     const iv = Buffer.from(parts[0], 'hex');
     const encrypted = parts[1];
     const decipher = createDecipheriv(ALGORITHM, KEY, iv);
@@ -107,21 +99,19 @@ function decrypt(encryptedText: string): string {
     decrypted += decipher.final('utf8');
     return decrypted;
   } catch (e) {
-    return encryptedText; // Если не удалось расшифровать
+    return encryptedText;
   }
 }
 
 // ============== RATE LIMITING (МЯГКИЙ) ==============
 const rateLimitMap = new Map<number, { count: number; lastRequest: number; warned: boolean }>();
-const RATE_LIMIT_WINDOW = 60000; // 1 минута
-const RATE_LIMIT_MAX = 30; // 30 запросов в минуту
-const RATE_LIMIT_WARN = 20; // Предупреждение после 20 запросов
+const RATE_LIMIT_WINDOW = 60000;
+const RATE_LIMIT_MAX = 30;
+const RATE_LIMIT_WARN = 20;
 
-// Пользователи в активной анкете - exempt от rate limiting
 const activeQuestionnaires = new Set<number>();
 
 function checkRateLimit(userId: number): { allowed: boolean; warn: boolean; remaining: number } {
-  // Пропускаем пользователей в активной анкете
   if (activeQuestionnaires.has(userId)) {
     return { allowed: true, warn: false, remaining: RATE_LIMIT_MAX };
   }
@@ -149,7 +139,6 @@ function checkRateLimit(userId: number): { allowed: boolean; warn: boolean; rema
   return { allowed: true, warn: shouldWarn, remaining: RATE_LIMIT_MAX - record.count };
 }
 
-// Очистка старых записей rate limit каждые 5 минут
 setInterval(() => {
   const now = Date.now();
   for (const [userId, record] of rateLimitMap.entries()) {
@@ -175,12 +164,10 @@ function validateUrl(text: string): { valid: boolean; isUrl: boolean; value: str
   
   const trimmed = text.trim().toLowerCase();
   
-  // Если "нет" или похожее - разрешаем как текст
   if (trimmed === 'нет' || trimmed === 'нет резюме' || trimmed === '-') {
     return { valid: true, isUrl: false, value: 'Резюме не предоставлено' };
   }
   
-  // Проверяем URL
   try {
     const url = new URL(text.startsWith('http') ? text : `https://${text}`);
     const allowedDomains = ['.ru', '.com', '.org', '.net', '.io', '.pdf', 'drive.google', 'docs.google', 'yandex', 'mail.ru', 'vk.com', 'hh.ru', 'linkedin', 'github'];
@@ -192,7 +179,6 @@ function validateUrl(text: string): { valid: boolean; isUrl: boolean; value: str
     
     return { valid: true, isUrl: false, value: sanitizeInput(text, 500) };
   } catch (e) {
-    // Не URL - принимаем как текст описания опыта
     return { valid: true, isUrl: false, value: sanitizeInput(text, 500) };
   }
 }
@@ -243,7 +229,7 @@ const BOT_CONFIG = {
   planetaLink: 'https://planeta.ru/campaigns/feldsherryadom',
   sberLink: 'https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM',
   supportPhone: '+7 (965) 843-78-18',
-  privacyLink: 'https://feldsher-land.ru/privacy',
+  privacyLink: 'https://feldsher-land.ru/legal',
   vkPatientLink: 'https://vk.com/feldsherryadom',
   vkFeldsherLink: 'https://vk.com/feldsherizh',
   districts: [
@@ -331,7 +317,6 @@ async function setUserState(maxId: number, flowType: string, currentStep: string
   });
   if (!user) return null;
   
-  // Добавляем в активные анкеты
   activeQuestionnaires.add(maxId);
   
   return prisma.maxUserState.upsert({
@@ -348,7 +333,6 @@ async function clearUserState(maxId: number) {
   if (user) {
     await prisma.maxUserState.deleteMany({ where: { maxUserId: user.id } });
   }
-  // Убираем из активных анкет
   activeQuestionnaires.delete(maxId);
 }
 
@@ -361,7 +345,7 @@ async function saveWaitlistEntry(maxId: number, data: any) {
     data: {
       maxUserId: user.id,
       name: sanitizeInput(data.name, 100),
-      phone: encrypt(data.phone), // Шифруем телефон
+      phone: encrypt(data.phone),
       district: sanitizeInput(data.district, 50),
     },
   });
@@ -376,7 +360,7 @@ async function saveFeldsherApplication(maxId: number, data: any) {
     data: {
       maxUserId: user.id,
       name: sanitizeInput(data.name, 100),
-      phone: encrypt(data.phone), // Шифруем телефон
+      phone: encrypt(data.phone),
       experience: sanitizeInput(data.experience, 10),
       scheduleType: sanitizeInput(data.scheduleType, 50),
       resumeLink: sanitizeInput(data.resumeLink, 500) || null,
@@ -393,7 +377,7 @@ async function saveQuestion(maxId: number, data: any) {
     data: {
       maxUserId: user.id,
       name: sanitizeInput(data.name, 100),
-      phone: encrypt(data.phone), // Шифруем телефон
+      phone: encrypt(data.phone),
       question: sanitizeInput(data.question, MAX_QUESTION_LENGTH),
     },
   });
@@ -407,27 +391,15 @@ const ConsentKeyboard = Keyboard.inlineKeyboard([
 ]);
 
 const MainKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('📋 Пациентам', 'menu_patient')],
-  [Keyboard.button.callback('👨‍⚕️ Фельдшерам', 'menu_feldsher')],
-  [Keyboard.button.callback('❓ Задать вопрос', 'menu_question')],
-  [Keyboard.button.callback('📖 О проекте', 'menu_about')],
-]);
-
-const PatientKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('📋 Хочу в лист ожидания', 'patient_waitlist')],
-  [Keyboard.button.callback('📦 Заказать справки/выписки', 'patient_order')],
-  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-]);
-
-const FeldsherKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('📝 Заполнить анкету', 'feldsher_apply')],
-  [Keyboard.button.callback('📖 О проекте', 'feldsher_about')],
-  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-]);
-
-const QuestionKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('✍️ Задать вопрос', 'question_ask')],
-  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
+  [Keyboard.button.callback('💰 Оплатить предзаказ', 'patient_order')],
+  [Keyboard.button.callback('❓ У меня есть вопрос', 'question_ask')],
+  [Keyboard.button.callback('👨‍⚕️ Фельдшеру (отправить резюме)', 'feldsher_apply')],
+  [Keyboard.button.callback('📄 Текст доверенности', 'menu_doveren')],
+  [Keyboard.button.callback('❤️ Поддержать проект', 'menu_podderzhka')],
+  [Keyboard.button.callback('🗑️ Отозвать согласие', 'menu_revoke')],
+  [Keyboard.button.callback('🔐 Свод правил', 'menu_privacy')],
+  [Keyboard.button.callback('📢 Наши каналы', 'menu_channels')],
 ]);
 
 const CancelKeyboard = Keyboard.inlineKeyboard([
@@ -435,7 +407,7 @@ const CancelKeyboard = Keyboard.inlineKeyboard([
 ]);
 
 const BackKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('🔙 Назад', 'main_menu')],
+  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
 ]);
 
 const DistrictsKeyboard = Keyboard.inlineKeyboard([
@@ -458,11 +430,13 @@ const ConfirmKeyboard = Keyboard.inlineKeyboard([
 ]);
 
 const RevokeKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('✅ Да, удалить мои данные', 'revoke_confirm')],
-  [Keyboard.button.callback('❌ Отмена', 'main_menu')],
+  [Keyboard.button.callback('❌ Отозвать согласие', 'revoke_confirm')],
+  [Keyboard.button.callback('✅ Не отзывать согласие', 'main_menu')],
 ]);
 
-const PrivacyKeyboard = Keyboard.inlineKeyboard([
+const PodderzhkaKeyboard = Keyboard.inlineKeyboard([
+  [Keyboard.button.callback('💳 Сбербанк', 'podderzhka_sber')],
+  [Keyboard.button.callback('🌍 Planeta.ru', 'podderzhka_planeta')],
   [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
 ]);
 
@@ -472,101 +446,121 @@ const ChannelsKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
 ]);
 
-const PodderzhkaKeyboard = Keyboard.inlineKeyboard([
-  [Keyboard.button.callback('💳 Сбербанк', 'podderzhka_sber')],
-  [Keyboard.button.callback('🌍 Planeta.ru', 'podderzhka_planeta')],
-  [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
-]);
-
 // ============== MESSAGES ==============
 
-const CONSENT_MESSAGE = `🔒 **Согласие на обработку персональных данных**
+const CONSENT_MESSAGE = `Этот бот — ваш помощник в проекте «Фельдшеръ.Рядом».
 
-Нажимая кнопку «Согласен», вы подтверждаете свое согласие на обработку персональных данных в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных».
+Он позволяет:
 
-**Обрабатываемые данные:**
-• ФИО
-• Номер телефона
-• Район проживания (для пациентов)
-• Информация о стаже работы (для фельдшеров)
+🏥 Пациентам:
+📋 Записаться в лист ожидания открытия кабинета, получить скидку на подписку.
+   Мы отправим вам приглашение на открытие фельдшерского кабинета.
+💰 Оплатить предзаказ (скидка - 20%, ограниченное предложение).
+   Скидка будет закреплена за вами и активирована после открытия кабинета.
+❓ Задать любой вопрос – мы ответим лично.
 
-**Цели обработки:**
-• Запись в лист ожидания на вызов фельдшера
-• Ответы на ваши вопросы
-• Рассмотрение анкет фельдшеров
+👨‍⚕️ Фельдшерам: оставить контакты и резюме для сотрудничества.
 
-**Срок хранения:** до момента отзыва согласия
+❤️ Поддержать проект.
 
-Политика конфиденциальности: ${BOT_CONFIG.privacyLink}`;
+Все сообщения мгновенно поступают администратору.
+Бот работает 24/7, а администратор отвечает в рабочее время с 07.00 до 20.00 (время МСК).
 
-const WELCOME_MESSAGE = `👋 Добро пожаловать в «Фельдшеръ.Рядом»!
+Чтобы начать пользоваться ботом, примите согласие на обработку персональных данных
 
-Мы — служба вызова фельдшера на дом для жителей Ижевска.
+✅ СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСОНАЛЬНЫХ ДАННЫХ
 
-**Выберите раздел:**`;
+Я, заполняя форму в боте по ссылке в интернете https://max.ru/id1800048162_1_bot, даю своё добровольное и информированное согласие Обществу с ограниченной ответственностью «Фельдшер и компания» (ООО «Фельдшер и Ко», ИНН 1800048162, ОГРН 1261800002694, юридический адрес: 426000, РФ, Удмуртская Республика, г. Ижевск) на обработку моих персональных данных, которые я укажу далее (имя, номер телефона, предпочтительный район обслуживания, сведения об опыте работы, ссылка на резюме), с целями:
+– формирования листа ожидания открытия фельдшерского кабинета;
+– связи со мной по вопросам проекта;
+– рассмотрения моей кандидатуры в качестве фельдшера (для соискателей);
+– ответа на мои вопросы.
 
-const PATIENT_MENU_MESSAGE = `📋 **Меню для пациентов**
+Обработка включает в себя (в соответствии с п. 3 ст. 3 Федерального закона № 152-ФЗ): сбор, запись, систематизацию, накопление, хранение, уточнение (обновление, изменение), извлечение, использование, передачу (в целях, указанных выше), обезличивание, блокирование, удаление, уничтожение персональных данных.
 
-Выберите действие:`;
+Я ознакомлен(а) с Политикой конфиденциальности Оператора – она доступна по команде /privacy в этом боте, а также в закреплённых сообщениях каналов в «Макс» и ВКонтакте, и на сайте https://feldsher-land.ru/legal.html.
 
-const FELDSHER_MENU_MESSAGE = `👨‍⚕️ **Меню для фельдшеров**
+Срок действия согласия: с момента его предоставления до достижения целей обработки либо до момента отзыва согласия субъектом.
+Я могу отозвать это согласие в любой момент, написав об этом в данного бота (например, отправив сообщение с текстом «Отозвать согласие»), либо по электронной почте feldland@yandex.ru.
+Отзыв согласия не имеет обратной силы в части уже обработанных данных.
 
-Выберите действие:`;
+Нажимая кнопку «✅ Согласен», я подтверждаю, что прочитал(а) и принимаю условия выше.`;
 
-const QUESTION_MENU_MESSAGE = `❓ **Задать вопрос**
+const WELCOME_MESSAGE = `👋 Здравствуйте! Я бот проекта «Фельдшеръ.Рядом».
 
-У вас есть вопрос? Нажмите кнопку ниже, чтобы задать его.`;
+Я помогу:
+📋 записаться в лист ожидания открытия кабинета,
+❓ задать вопрос о проекте,
+👨‍⚕️ оставить резюме фельдшеру,
+❤️ поддержать проект.
 
-const ABOUT_MESSAGE = `📖 **О проекте «Фельдшеръ.Рядом»**
+Выберите, что вас интересует:`;
 
-Мы — служба вызова фельдшера на дом для жителей Ижевска.
+const ORDER_MESSAGE = `💰 ОПЛАТА ПРЕДЗАКАЗА
 
-**Наши услуги:**
-• Вызов фельдшера на дом
-• Оформление справок и выписок
-• Консультации по здоровью
+Для оплаты предзаказа воспользуйтесь ссылкой:
+[Ссылка будет добавлена позже]
 
-**Контакты:**
-📞 ${BOT_CONFIG.supportPhone}
-🌐 ${BOT_CONFIG.vkPatientLink}`;
+Если у вас возникли вопросы, напишите нам:
+📧 feldland@yandex.ru или задайте вопрос через этот бот`;
 
-const ORDER_MESSAGE = `📦 **Заказ справок/выписок**
+const DOVEREN_MESSAGE = `📄 ДОВЕРЕННОСТЬ
 
-Для заказа справок и выписок обратитесь к нам:
+Я, (Фамилия, Имя, Отчество), паспортные данные доверителя полностью
+доверяю (Фамилия, Имя, Отчество), паспортные данные доверенного лица полностью
+сопровождать моего ребёнка Фамилия, Имя, Отчество ребёнка и дата рождения
+в медицинский кабинет «Фельдшеръ.Рядом» (ООО «Фельдшер и компания»)
+для получения доврачебной медицинской помощи (осмотр, инъекции, ЭКГ, справки и т.п. в рамках компетенции фельдшера).
 
-📞 ${BOT_CONFIG.supportPhone}
+Предоставляю право подписывать необходимые медицинские документы,
+включая информированное добровольное согласие на медицинские вмешательства, получать результаты осмотров и справки.
 
-Или напишите в группу: ${BOT_CONFIG.vkPatientLink}`;
+Доверенность действительна по (ДАТА ДЕЙСТВИЯ ДОВЕРЕННОСТИ)
+ПОДПИСЬ, РАСШИФРОВКА ПОДПИСИ
+(ДАТА НАПИСАНИЯ ДОВЕРЕННОСТИ)`;
 
-const DOVEREN_MESSAGE = `📝 **Доверенность на получение документов**
+const PODDERZHKA_MESSAGE = `Спасибо за желание помочь проекту «Фельдшеръ.Рядом»! ❤️
 
-Для оформления доверенности обратитесь к нам:
+Сбор средств на платформе краудфандинга:
+https://planeta.ru/campaigns/feldsherryadom
 
-📞 ${BOT_CONFIG.supportPhone}
+Перевод по ссылке:
+https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM
 
-Мы поможем оформить все необходимые документы.`;
+Если хотите отправить анонимно, то можете сделать перевод напрямую по номеру телефона:
+📞 +7 (965) 843-78-18 (лучше добавить комментарий про фельдшерский кабинет)`;
 
-const PODDERZHKA_MESSAGE = `💖 **Поддержать проект**
+const PRIVACY_MESSAGE = `Политика конфиденциальности и согласие на обработку персональных данных по ссылкам ниже:
 
-Вы можете помочь проекту «Фельдшеръ.Рядом» развиваться:
+📄 Политика конфиденциальности находится по ссылке ниже:
+https://feldsher-land.ru/legal
 
-Выберите способ поддержки:`;
+🔐 Согласие на обработку персональных данных:
+Действует для этого бота, его нужно принять перед использованием бота.`;
 
-const PRIVACY_MESSAGE = `🔒 **Политика конфиденциальности**
+const CHANNELS_MESSAGE = `Друзья, вы можете подписаться на наши каналы по ссылкам ниже
 
-Полная версия политики конфиденциальности доступна по ссылке:
+Пациентам:
 
- ${BOT_CONFIG.privacyLink}`;
+🟪 MAX
+https://max.ru/join/56sp6ngnZou3IeaUAUqfiopUefYBUMacUwg1ExkHAa8
 
-const CHANNELS_MESSAGE = `📢 **Наши каналы**
+🔵 VK
+https://vk.com/feldsherryadom
 
-Подпишитесь на наши каналы в MAX:`;
+Фельдшерам:
 
-const REVOKE_MESSAGE = `⚠️ **Удаление данных**
+🟪 MAX
+https://max.ru/join/rre51qvmREhGKRnNFf4vcVZ_U3mj_obCY8L2wNHAxo8
 
-Вы уверены, что хотите удалить все ваши данные из бота?
+🔵 VK
+https://vk.com/feldsherizh`;
 
-Это действие нельзя отменить.`;
+const REVOKE_MESSAGE = `Вы можете отозвать согласие на обработку персональных данных, используя кнопку ниже.
+
+Если вы отзовёте согласие, то все ваши данные будут очищены. Чтобы использовать бота снова, отправьте ему команду /start.
+
+Вы желаете отозвать согласие?`;
 
 // ============== HELPER FUNCTIONS ==============
 
@@ -621,13 +615,11 @@ async function safeReply(ctx: any, text: string, options?: any): Promise<boolean
 
 async function sendNotification(message: string, urgent: boolean = false) {
   try {
-    // Сначала пробуем канал
     if (CHANNEL_ID) {
       const chatId = parseInt(CHANNEL_ID);
       await bot.api.sendMessageToChat(chatId, message);
     }
   } catch (e) {
-    // Если канал недоступен - отправляем админу
     try {
       await bot.api.sendMessageToChat(ADMIN_ID, message);
     } catch (e2) {
@@ -639,7 +631,6 @@ async function sendNotification(message: string, urgent: boolean = false) {
 async function notifyAdmin(type: 'waitlist' | 'feldsher' | 'question', data: any) {
   let message = '';
   
-  // Расшифровываем телефон для уведомления
   const phone = decrypt(data.phone);
   
   switch (type) {
@@ -698,19 +689,16 @@ async function createBackup() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = join(dataDir, 'backups', `backup-${timestamp}.sqlite`);
     
-    // Создаём папку для бэкапов
     const backupDir = join(dataDir, 'backups');
     if (!existsSync(backupDir)) {
       mkdirSync(backupDir, { recursive: true });
     }
     
-    // Копируем файл
     const dbContent = readFileSync(dbPath);
     writeFileSync(backupPath, dbContent);
     
     log('INFO', `Backup created: ${backupPath}`);
     
-    // Уведомление о бэкапе
     const message = `💾 Бэкап базы данных создан
 
 🕐 Время: ${new Date().toISOString()}
@@ -719,7 +707,6 @@ async function createBackup() {
     
     await sendNotification(message);
     
-    // Удаляем старые бэкапы (оставляем последние 7)
     const files = readdirSync(backupDir)
       .filter(f => f.startsWith('backup-'))
       .sort()
@@ -739,11 +726,9 @@ async function createBackup() {
   }
 }
 
-// Бэкап каждые 6 часов
 setInterval(createBackup, 6 * 60 * 60 * 1000);
 
 // ============== HEALTH CHECK ENDPOINT ==============
-// Простой HTTP сервер для health check (без sensitive данных)
 
 async function startHealthServer() {
   const http = require('http');
@@ -753,7 +738,7 @@ async function startHealthServer() {
       res.end(JSON.stringify({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '11.0'
+        version: '11.2'
       }));
     } else {
       res.writeHead(404);
@@ -777,7 +762,7 @@ bot.use(async (ctx, next) => {
     if (!rateCheck.allowed) {
       log('WARN', `Rate limit exceeded for user ${id}`);
       await notifySuspiciousActivity(id, 'RATE_LIMIT_EXCEEDED');
-      return; // Молча игнорируем, не блокируем пользователя
+      return;
     }
     
     if (rateCheck.warn) {
@@ -799,7 +784,6 @@ bot.use(async (ctx, next) => {
     return next();
   }
 
-  // Разрешаем обработку согласия без проверки
   if (callbackData === 'consent_yes' || callbackData === 'consent_no' || callbackData === 'consent_retry') {
     return next();
   }
@@ -855,13 +839,7 @@ bot.command('start', async (ctx) => {
   await safeReply(ctx, WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
 
-bot.command('patient', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-
-  await safeReply(ctx, PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
-});
-
+// 1. /waitlist - 📋 Хочу в лист ожидания
 bot.command('waitlist', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `/waitlist command, userId: ${id}`);
@@ -874,6 +852,7 @@ bot.command('waitlist', async (ctx) => {
   await safeReply(ctx, 'Напишите имя');
 });
 
+// 2. /order - 💰 Оплатить предзаказ
 bot.command('order', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -881,6 +860,7 @@ bot.command('order', async (ctx) => {
   await safeReply(ctx, ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
+// 3. /question - ❓ У меня есть вопрос
 bot.command('question', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `/question command, userId: ${id}`);
@@ -893,6 +873,7 @@ bot.command('question', async (ctx) => {
   await safeReply(ctx, 'Напишите ваше имя');
 });
 
+// 4. /feldsher - 👨‍⚕️ Фельдшеру (отправить резюме)
 bot.command('feldsher', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `/feldsher command, userId: ${id}`);
@@ -905,6 +886,7 @@ bot.command('feldsher', async (ctx) => {
   await safeReply(ctx, 'Как вас зовут?');
 });
 
+// 5. /doveren - 📄 Текст доверенности
 bot.command('doveren', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -912,6 +894,7 @@ bot.command('doveren', async (ctx) => {
   await safeReply(ctx, DOVEREN_MESSAGE, { attachments: [BackKeyboard] });
 });
 
+// 6. /podderzhka - ❤️ Поддержать проект
 bot.command('podderzhka', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -919,20 +902,22 @@ bot.command('podderzhka', async (ctx) => {
   await safeReply(ctx, PODDERZHKA_MESSAGE, { attachments: [PodderzhkaKeyboard] });
 });
 
+// 7. /revoke - 🗑️ Отозвать согласие
 bot.command('revoke', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
 
-  await setUserState(id, 'revoke', 'confirm', {});
   await safeReply(ctx, REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
 });
 
+// 8. /privacy – 🔐 Свод правил
 bot.command('privacy', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  await safeReply(ctx, PRIVACY_MESSAGE, { attachments: [PrivacyKeyboard] });
+  await safeReply(ctx, PRIVACY_MESSAGE, { attachments: [BackKeyboard] });
 });
 
+// 9. /channels - 📢 Наши каналы
 bot.command('channels', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
@@ -992,7 +977,7 @@ bot.action('consent_no', async (ctx) => {
   if (!id) return;
   
   securityLog('CONSENT_DENIED', id);
-  await safeReply(ctx, '❌ Без согласия функционал бота недоступен. Напишите /start чтобы попробовать снова.');
+  await safeReply(ctx, '❌ Без согласия функционал бота недоступен. Напишите /start, чтобы попробовать снова.');
 });
 
 bot.action('consent_retry', async (ctx) => {
@@ -1014,40 +999,34 @@ bot.action('main_menu', async (ctx) => {
   await safeReply(ctx, WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
 
-bot.action('menu_patient', async (ctx) => {
+bot.action('menu_doveren', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `menu_patient callback, userId: ${id}`);
-  
   if (!id) return;
-
-  await clearUserState(id);
-  await safeReply(ctx, PATIENT_MENU_MESSAGE, { attachments: [PatientKeyboard] });
+  await safeReply(ctx, DOVEREN_MESSAGE, { attachments: [BackKeyboard] });
 });
 
-bot.action('menu_feldsher', async (ctx) => {
+bot.action('menu_podderzhka', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `menu_feldsher callback, userId: ${id}`);
-  
   if (!id) return;
-
-  await clearUserState(id);
-  await safeReply(ctx, FELDSHER_MENU_MESSAGE, { attachments: [FeldsherKeyboard] });
+  await safeReply(ctx, PODDERZHKA_MESSAGE, { attachments: [PodderzhkaKeyboard] });
 });
 
-bot.action('menu_question', async (ctx) => {
+bot.action('menu_revoke', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `menu_question callback, userId: ${id}`);
-  
   if (!id) return;
-
-  await clearUserState(id);
-  await safeReply(ctx, QUESTION_MENU_MESSAGE, { attachments: [QuestionKeyboard] });
+  await safeReply(ctx, REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
 });
 
-bot.action('menu_about', async (ctx) => {
+bot.action('menu_privacy', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-  await safeReply(ctx, ABOUT_MESSAGE, { attachments: [BackKeyboard] });
+  await safeReply(ctx, PRIVACY_MESSAGE, { attachments: [BackKeyboard] });
+});
+
+bot.action('menu_channels', async (ctx) => {
+  const id = getUserId(ctx);
+  if (!id) return;
+  await safeReply(ctx, CHANNELS_MESSAGE, { attachments: [ChannelsKeyboard] });
 });
 
 // ========== PATIENT WAITLIST ==========
@@ -1098,20 +1077,26 @@ bot.action('feldsher_apply', async (ctx) => {
   await safeReply(ctx, 'Как вас зовут?');
 });
 
-bot.action('feldsher_about', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  await safeReply(ctx, ABOUT_MESSAGE, { attachments: [BackKeyboard] });
-});
-
 // ========== CHANNEL LINKS ==========
 
 bot.action('channel_patient', async (ctx) => {
-  await safeReply(ctx, `👥 Канал для пациентов:\n\n${BOT_CONFIG.patientChannelLink}`);
+  await safeReply(ctx, `👥 Канал для пациентов:
+
+🟪 MAX
+https://max.ru/join/56sp6ngnZou3IeaUAUqfiopUefYBUMacUwg1ExkHAa8
+
+🔵 VK
+https://vk.com/feldsherryadom`);
 });
 
 bot.action('channel_feldsher', async (ctx) => {
-  await safeReply(ctx, `👨‍⚕️ Канал для фельдшеров:\n\n${BOT_CONFIG.feldsherChannelLink}`);
+  await safeReply(ctx, `👨‍⚕️ Канал для фельдшеров:
+
+🟪 MAX
+https://max.ru/join/rre51qvmREhGKRnNFf4vcVZ_U3mj_obCY8L2wNHAxo8
+
+🔵 VK
+https://vk.com/feldsherizh`);
 });
 
 // ========== PODDERZHKA LINKS ==========
@@ -1133,7 +1118,7 @@ bot.action('cancel_flow', async (ctx) => {
   if (!id) return;
   
   await clearUserState(id);
-  await safeReply(ctx, '❌ Операция отменена. Выберите действие:', { attachments: [MainKeyboard] });
+  await safeReply(ctx, WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
 
 // ========== REVOKE CONFIRM ==========
@@ -1261,7 +1246,7 @@ bot.on('message_created', async (ctx) => {
   const state = await getUserState(id);
   
   if (!state) {
-    await safeReply(ctx, 'Выберите действие:', { attachments: [MainKeyboard] });
+    await safeReply(ctx, WELCOME_MESSAGE, { attachments: [MainKeyboard] });
     return;
   }
   
@@ -1366,7 +1351,7 @@ bot.catch((err, ctx) => {
 // ============== START BOT ==============
 
 async function main() {
-  log('INFO', 'Starting bot v11.0...');
+  log('INFO', 'Starting bot v11.2...');
   
   try {
     await prisma.$connect();
@@ -1376,18 +1361,15 @@ async function main() {
     process.exit(1);
   }
   
-  // Создаём начальный бэкап
   await createBackup();
   
-  // Запускаем health check сервер
   startHealthServer();
   
   try {
     await bot.start();
     log('INFO', 'Bot started successfully');
     
-    // Уведомление о запуске
-    await sendNotification(`🤖 Бот запущен (v11.0)\n🕐 ${new Date().toISOString()}`);
+    await sendNotification(`🤖 Бот запущен (v11.2)\n🕐 ${new Date().toISOString()}`);
   } catch (e) {
     log('ERROR', 'Bot start error', e);
     process.exit(1);
