@@ -1,9 +1,13 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 11.8
+ * Version: 11.9
  * 
- * v11.8: Полный функционал v11.2 + исправленная БД (String вместо DateTime)
+ * v11.9:
+ * - ИСПРАВЛЕНО: Быстрое меню по / настроено через setMyCommands()
+ * - ИСПРАВЛЕНО: /privacy описание "Свод правил"
+ * - ИСПРАВЛЕНО: Кнопка ❌ Отмена на ВСЕХ этапах анкет
+ * - ИСПРАВЛЕНО: Резюме - только ссылка или "нет"
  */
 
 import { Bot, Keyboard } from '@maxhub/max-bot-api';
@@ -172,27 +176,28 @@ function sanitizeInput(text: string, maxLength: number = MAX_INPUT_LENGTH): stri
   return sanitized;
 }
 
-function validateUrl(text: string): { valid: boolean; isUrl: boolean; value: string } {
+function validateUrl(text: string): { valid: boolean; isUrl: boolean; value: string; error?: string } {
   if (!text) return { valid: true, isUrl: false, value: '' };
   
   const trimmed = text.trim().toLowerCase();
   
-  if (trimmed === 'нет' || trimmed === 'нет резюме' || trimmed === '-') {
+  // Разрешаем "нет" или "нет резюме"
+  if (trimmed === 'нет' || trimmed === 'нет резюме' || trimmed === '-' || trimmed === 'нету') {
     return { valid: true, isUrl: false, value: 'Резюме не предоставлено' };
   }
   
+  // Проверяем что это реальная ссылка
   try {
     const url = new URL(text.startsWith('http') ? text : `https://${text}`);
-    const allowedDomains = ['.ru', '.com', '.org', '.net', '.io', '.pdf', 'drive.google', 'docs.google', 'yandex', 'mail.ru', 'vk.com', 'hh.ru', 'linkedin', 'github'];
-    const isAllowed = allowedDomains.some(d => url.hostname.includes(d) || url.pathname.includes(d));
     
-    if (isAllowed || url.protocol === 'https:') {
-      return { valid: true, isUrl: true, value: url.href };
+    // Проверяем что это действительно URL с доменом
+    if (!url.hostname.includes('.')) {
+      return { valid: false, isUrl: false, value: '', error: 'Неверный формат ссылки' };
     }
     
-    return { valid: true, isUrl: false, value: sanitizeInput(text, 500) };
+    return { valid: true, isUrl: true, value: url.href };
   } catch (e) {
-    return { valid: true, isUrl: false, value: sanitizeInput(text, 500) };
+    return { valid: false, isUrl: false, value: '', error: 'Пришлите ссылку на резюме или напишите «нет»' };
   }
 }
 
@@ -497,16 +502,18 @@ const DistrictsKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('Октябрьский', 'district_3')],
   [Keyboard.button.callback('Первомайский', 'district_4')],
   [Keyboard.button.callback('Устиновский', 'district_5')],
+  [Keyboard.button.callback('❌ Отмена', 'cancel_flow')],
 ]);
 
 const ScheduleKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('16 смен (основной фельдшер)', 'schedule_main')],
   [Keyboard.button.callback('12 смен (воскресный фельдшер)', 'schedule_sunday')],
+  [Keyboard.button.callback('❌ Отмена', 'cancel_flow')],
 ]);
 
 const ConfirmKeyboard = Keyboard.inlineKeyboard([
   [Keyboard.button.callback('✅ Отправить', 'confirm_submit')],
-  [Keyboard.button.callback('❌ Не отправлять', 'cancel_flow')],
+  [Keyboard.button.callback('❌ Отмена', 'cancel_flow')],
   [Keyboard.button.callback('🏠 Главное меню', 'main_menu')],
 ]);
 
@@ -819,7 +826,7 @@ async function startHealthServer() {
       res.end(JSON.stringify({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '11.8'
+        version: '11.9'
       }));
     } else {
       res.writeHead(404);
@@ -830,6 +837,28 @@ async function startHealthServer() {
   server.listen(BOT_CONFIG.port, () => {
     log('INFO', `Health check server started on port ${BOT_CONFIG.port}`);
   });
+}
+
+// ============== SET BOT COMMANDS (БЫСТРОЕ МЕНЮ) ==============
+async function setBotCommands() {
+  try {
+    // Команды полностью совпадают с главным меню
+    await bot.api.setMyCommands([
+      { command: 'start', description: 'Главное меню' },
+      { command: 'waitlist', description: 'Хочу в лист ожидания' },
+      { command: 'order', description: 'Оплатить предзаказ' },
+      { command: 'question', description: 'У меня есть вопрос' },
+      { command: 'feldsher', description: 'Фельдшеру (отправить резюме)' },
+      { command: 'doveren', description: 'Текст доверенности' },
+      { command: 'podderzhka', description: 'Поддержать проект' },
+      { command: 'revoke', description: 'Отозвать согласие' },
+      { command: 'privacy', description: 'Свод правил' },
+      { command: 'channels', description: 'Наши каналы' },
+    ]);
+    log('INFO', 'Bot commands menu set successfully');
+  } catch (e) {
+    log('ERROR', 'Failed to set bot commands', e);
+  }
 }
 
 // ============== MIDDLEWARE - RATE LIMITING ==============
@@ -930,7 +959,7 @@ bot.command('waitlist', async (ctx) => {
   log('INFO', `User ${id} starting waitlist flow`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
-  await safeReply(ctx, 'Напишите имя');
+  await safeReply(ctx, 'Напишите имя', { attachments: [CancelKeyboard] });
 });
 
 // 2. /order - 💰 Оплатить предзаказ
@@ -951,7 +980,7 @@ bot.command('question', async (ctx) => {
   log('INFO', `User ${id} starting question flow`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
-  await safeReply(ctx, 'Напишите ваше имя');
+  await safeReply(ctx, 'Напишите ваше имя', { attachments: [CancelKeyboard] });
 });
 
 // 4. /feldsher - 👨‍⚕️ Фельдшеру (отправить резюме)
@@ -964,7 +993,7 @@ bot.command('feldsher', async (ctx) => {
   log('INFO', `User ${id} starting feldsher flow`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
-  await safeReply(ctx, 'Как вас зовут?');
+  await safeReply(ctx, 'Как вас зовут?', { attachments: [CancelKeyboard] });
 });
 
 // 5. /doveren - 📄 Текст доверенности
@@ -1121,7 +1150,7 @@ bot.action('patient_waitlist', async (ctx) => {
   log('INFO', `Starting waitlist flow for user ${id}`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
-  await safeReply(ctx, 'Напишите имя');
+  await safeReply(ctx, 'Напишите имя', { attachments: [CancelKeyboard] });
 });
 
 bot.action('patient_order', async (ctx) => {
@@ -1141,7 +1170,7 @@ bot.action('question_ask', async (ctx) => {
   log('INFO', `Starting question flow for user ${id}`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
-  await safeReply(ctx, 'Напишите ваше имя');
+  await safeReply(ctx, 'Напишите ваше имя', { attachments: [CancelKeyboard] });
 });
 
 // ========== FELDSHER APPLY ==========
@@ -1155,7 +1184,7 @@ bot.action('feldsher_apply', async (ctx) => {
   log('INFO', `Starting feldsher flow for user ${id}`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
-  await safeReply(ctx, 'Как вас зовут?');
+  await safeReply(ctx, 'Как вас зовут?', { attachments: [CancelKeyboard] });
 });
 
 // ========== CHANNEL LINKS ==========
@@ -1384,7 +1413,7 @@ async function handleWaitlistFlow(ctx: any, id: number, text: string, state: any
       
     case 'phone':
       if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX');
+        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX', { attachments: [CancelKeyboard] });
         return;
       }
       state.data.phone = formatPhone(text);
@@ -1408,7 +1437,7 @@ async function handleFeldsherFlow(ctx: any, id: number, text: string, state: any
       
     case 'phone':
       if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX');
+        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX', { attachments: [CancelKeyboard] });
         return;
       }
       state.data.phone = formatPhone(text);
@@ -1418,7 +1447,7 @@ async function handleFeldsherFlow(ctx: any, id: number, text: string, state: any
       
     case 'experience':
       if (!validateExperience(text)) {
-        await safeReply(ctx, '❌ Укажите стаж числом (например: 5)');
+        await safeReply(ctx, '❌ Укажите стаж числом (например: 5)', { attachments: [CancelKeyboard] });
         return;
       }
       state.data.experience = text.replace(/\D/g, '') + ' лет';
@@ -1428,6 +1457,10 @@ async function handleFeldsherFlow(ctx: any, id: number, text: string, state: any
       
     case 'resume':
       const urlResult = validateUrl(text);
+      if (!urlResult.valid) {
+        await safeReply(ctx, `❌ ${urlResult.error}`, { attachments: [CancelKeyboard] });
+        return;
+      }
       state.data.resumeLink = urlResult.value;
       await setUserState(id, 'feldsher', 'confirm', state.data);
       
@@ -1456,7 +1489,7 @@ async function handleQuestionFlow(ctx: any, id: number, text: string, state: any
       
     case 'phone':
       if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX');
+        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX', { attachments: [CancelKeyboard] });
         return;
       }
       state.data.phone = formatPhone(text);
@@ -1504,7 +1537,7 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 async function startBot() {
   try {
-    log('INFO', 'Starting bot v11.8...');
+    log('INFO', 'Starting bot v11.9...');
     log('INFO', `ADMIN_ID: ${ADMIN_ID}`);
     log('INFO', `CHANNEL_ID: ${CHANNEL_ID}`);
     
@@ -1515,6 +1548,9 @@ async function startBot() {
       process.exit(1);
     }
     
+    // Устанавливаем команды бота (быстрое меню)
+    await setBotCommands();
+    
     // Запускаем health check server
     startHealthServer();
     
@@ -1523,11 +1559,17 @@ async function startBot() {
     log('INFO', 'Bot started successfully!');
     
     // Уведомляем админа о запуске
-    await sendNotification(`🤖 Бот v11.8 запущен!
+    await sendNotification(`🤖 Бот v11.9 запущен!
 
 🕐 Время: ${new Date().toISOString()}
 📊 База данных: OK
-✅ Полный функционал восстановлен`);
+✅ Исправлены все 4 ошибки
+
+📝 Изменения:
+• Быстрое меню по / настроено
+• /privacy = Свод правил
+• ❌ Отмена на всех этапах
+• Резюме: ссылка или «нет»`);
     
   } catch (error: any) {
     log('ERROR', 'Failed to start bot', error);
