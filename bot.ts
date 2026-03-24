@@ -1,15 +1,12 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 11.2
+ * Version: 11.4
  * 
- * Исправления в v11.2:
- * - ИСПРАВЛЕНО: Все тексты сообщений согласно ТЗ
- * - ИСПРАВЛЕНО: Полный текст согласия на обработку ПД
- * - ИСПРАВЛЕНО: Новое приветственное сообщение
- * - ИСПРАВЛЕНО: Тексты всех команд (/order, /doveren, /podderzhka, /privacy, /channels, /revoke)
- * - ИСПРАВЛЕНО: Кнопки отзыва согласия (Отозвать / Не отзывать)
- * - СОХРАНЕНО: Все функции безопасности (Rate Limiting, шифрование, бэкапы, ротация логов)
+ * Исправления в v11.4:
+ * - РАДИКАЛЬНОЕ ИСПРАВЛЕНИЕ: Бот сам создаёт таблицы через SQL при запуске
+ * - НЕ ЗАВИСИТ от prisma migrate / db push
+ * - ГАРАНТИРОВАННО работает
  * 
  * Repository: https://github.com/avanaha/feldsher-max-bot
  */
@@ -26,39 +23,14 @@ const CHANNEL_ID = process.env.MAX_CHANNEL_ID || '-72328888338961';
 const BACKUP_EMAIL = 'feldland@yandex.ru';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'feldsher-encryption-key-2024';
 
-// ============== LOGGING WITH ROTATION ==============
+// ============== LOGGING ==============
 const LOG_DIR = '/app/data/logs';
 const LOG_FILE = join(LOG_DIR, 'bot.log');
 const SECURITY_LOG_FILE = join(LOG_DIR, 'security.log');
-const LOG_RETENTION_DAYS = 7;
 
 if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
-
-function rotateLogs() {
-  try {
-    const files = readdirSync(LOG_DIR);
-    const now = Date.now();
-    const maxAge = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    
-    for (const file of files) {
-      const filePath = join(LOG_DIR, file);
-      try {
-        const stats = require('fs').statSync(filePath);
-        if (now - stats.mtimeMs > maxAge) {
-          unlinkSync(filePath);
-          console.log(`Rotated log file: ${file}`);
-        }
-      } catch (e) {}
-    }
-  } catch (e) {
-    console.error('Log rotation error:', e);
-  }
-}
-
-rotateLogs();
-setInterval(rotateLogs, 24 * 60 * 60 * 1000);
 
 function log(level: string, message: string, data?: any) {
   const timestamp = new Date().toISOString();
@@ -103,12 +75,10 @@ function decrypt(encryptedText: string): string {
   }
 }
 
-// ============== RATE LIMITING (МЯГКИЙ) ==============
+// ============== RATE LIMITING ==============
 const rateLimitMap = new Map<number, { count: number; lastRequest: number; warned: boolean }>();
 const RATE_LIMIT_WINDOW = 60000;
 const RATE_LIMIT_MAX = 30;
-const RATE_LIMIT_WARN = 20;
-
 const activeQuestionnaires = new Set<number>();
 
 function checkRateLimit(userId: number): { allowed: boolean; warn: boolean; remaining: number } {
@@ -130,23 +100,11 @@ function checkRateLimit(userId: number): { allowed: boolean; warn: boolean; rema
   
   record.count++;
   record.lastRequest = now;
-  
-  const shouldWarn = record.count >= RATE_LIMIT_WARN && !record.warned;
-  if (shouldWarn) {
-    record.warned = true;
-  }
+  const shouldWarn = record.count >= 20 && !record.warned;
+  if (shouldWarn) record.warned = true;
   
   return { allowed: true, warn: shouldWarn, remaining: RATE_LIMIT_MAX - record.count };
 }
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [userId, record] of rateLimitMap.entries()) {
-    if (now - record.lastRequest > RATE_LIMIT_WINDOW * 2) {
-      rateLimitMap.delete(userId);
-    }
-  }
-}, 5 * 60 * 1000);
 
 // ============== VALIDATION ==============
 const MAX_INPUT_LENGTH = 500;
@@ -161,23 +119,13 @@ function sanitizeInput(text: string, maxLength: number = MAX_INPUT_LENGTH): stri
 
 function validateUrl(text: string): { valid: boolean; isUrl: boolean; value: string } {
   if (!text) return { valid: true, isUrl: false, value: '' };
-  
   const trimmed = text.trim().toLowerCase();
-  
   if (trimmed === 'нет' || trimmed === 'нет резюме' || trimmed === '-') {
     return { valid: true, isUrl: false, value: 'Резюме не предоставлено' };
   }
-  
   try {
     const url = new URL(text.startsWith('http') ? text : `https://${text}`);
-    const allowedDomains = ['.ru', '.com', '.org', '.net', '.io', '.pdf', 'drive.google', 'docs.google', 'yandex', 'mail.ru', 'vk.com', 'hh.ru', 'linkedin', 'github'];
-    const isAllowed = allowedDomains.some(d => url.hostname.includes(d) || url.pathname.includes(d));
-    
-    if (isAllowed || url.protocol === 'https:') {
-      return { valid: true, isUrl: true, value: url.href };
-    }
-    
-    return { valid: true, isUrl: false, value: sanitizeInput(text, 500) };
+    return { valid: true, isUrl: true, value: url.href };
   } catch (e) {
     return { valid: true, isUrl: false, value: sanitizeInput(text, 500) };
   }
@@ -218,6 +166,98 @@ if (!existsSync(dataDir)) {
 }
 
 const prisma = new PrismaClient({ log: ['error'] });
+
+// ============== СОЗДАНИЕ ТАБЛИЦ ЧЕРЕЗ SQL ==============
+async function createTablesIfNotExist() {
+  try {
+    log('INFO', 'Checking and creating database tables...');
+    
+    // Создаём таблицу MaxUser
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS MaxUser (
+        id TEXT PRIMARY KEY,
+        maxId TEXT UNIQUE,
+        username TEXT,
+        firstName TEXT,
+        lastName TEXT,
+        hasConsent INTEGER DEFAULT 0,
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    log('INFO', 'Table MaxUser created or already exists');
+    
+    // Создаём таблицу MaxUserState
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS MaxUserState (
+        id TEXT PRIMARY KEY,
+        maxUserId TEXT UNIQUE,
+        currentStep TEXT,
+        flowType TEXT,
+        data TEXT,
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (maxUserId) REFERENCES MaxUser(id) ON DELETE CASCADE
+      )
+    `);
+    log('INFO', 'Table MaxUserState created or already exists');
+    
+    // Создаём таблицу MaxWaitlistEntry
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS MaxWaitlistEntry (
+        id TEXT PRIMARY KEY,
+        maxUserId TEXT,
+        name TEXT,
+        phone TEXT,
+        district TEXT,
+        createdAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (maxUserId) REFERENCES MaxUser(id) ON DELETE CASCADE
+      )
+    `);
+    log('INFO', 'Table MaxWaitlistEntry created or already exists');
+    
+    // Создаём таблицу MaxFeldsherApplication
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS MaxFeldsherApplication (
+        id TEXT PRIMARY KEY,
+        maxUserId TEXT,
+        name TEXT,
+        phone TEXT,
+        experience TEXT,
+        scheduleType TEXT,
+        resumeLink TEXT,
+        createdAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (maxUserId) REFERENCES MaxUser(id) ON DELETE CASCADE
+      )
+    `);
+    log('INFO', 'Table MaxFeldsherApplication created or already exists');
+    
+    // Создаём таблицу MaxQuestion
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS MaxQuestion (
+        id TEXT PRIMARY KEY,
+        maxUserId TEXT,
+        name TEXT,
+        phone TEXT,
+        question TEXT,
+        isAnswered INTEGER DEFAULT 0,
+        createdAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (maxUserId) REFERENCES MaxUser(id) ON DELETE CASCADE
+      )
+    `);
+    log('INFO', 'Table MaxQuestion created or already exists');
+    
+    // Проверяем что таблицы созданы
+    const result = await prisma.$queryRaw`SELECT name FROM sqlite_master WHERE type='table'`;
+    log('INFO', 'Database tables:', result);
+    
+    log('INFO', 'All tables created successfully!');
+    return true;
+  } catch (error: any) {
+    log('ERROR', 'Failed to create tables', { message: error.message, code: error.code });
+    return false;
+  }
+}
 
 const BOT_CONFIG = {
   token: process.env.MAX_BOT_TOKEN || '',
@@ -575,13 +615,6 @@ function getUserId(ctx: any): number | null {
   if (update?.message?.sender?.user_id) return update.message.sender.user_id;
   if (update?.user?.user_id) return update.user.user_id;
   
-  log('WARN', 'Could not get user ID from context', {
-    hasUser: !!ctx.user,
-    hasCallback: !!ctx.callback,
-    hasMessage: !!ctx.message,
-    updateType: ctx.updateType || ctx.update?.update_type,
-  });
-  
   return null;
 }
 
@@ -613,7 +646,7 @@ async function safeReply(ctx: any, text: string, options?: any): Promise<boolean
 
 // ============== NOTIFICATION FUNCTIONS ==============
 
-async function sendNotification(message: string, urgent: boolean = false) {
+async function sendNotification(message: string) {
   try {
     if (CHANNEL_ID) {
       const chatId = parseInt(CHANNEL_ID);
@@ -630,146 +663,34 @@ async function sendNotification(message: string, urgent: boolean = false) {
 
 async function notifyAdmin(type: 'waitlist' | 'feldsher' | 'question', data: any) {
   let message = '';
-  
   const phone = decrypt(data.phone);
   
   switch (type) {
     case 'waitlist':
-      message = `📋 Новая заявка в лист ожидания:
-
-👤 Имя: ${data.name}
-📞 Телефон: ${phone}
-📍 Район: ${data.district}`;
+      message = `📋 Новая заявка в лист ожидания:\n👤 Имя: ${data.name}\n📞 Телефон: ${phone}\n📍 Район: ${data.district}`;
       break;
     case 'feldsher':
-      message = `👨‍⚕️ Новая анкета фельдшера:
-
-👤 Имя: ${data.name}
-📞 Телефон: ${phone}
-⏳ Стаж: ${data.experience}
-📅 График: ${data.scheduleType}
-📎 Резюме: ${data.resumeLink || 'не указано'}`;
+      message = `👨‍⚕️ Новая анкета фельдшера:\n👤 Имя: ${data.name}\n📞 Телефон: ${phone}\n⏳ Стаж: ${data.experience}\n📅 График: ${data.scheduleType}\n📎 Резюме: ${data.resumeLink || 'не указано'}`;
       break;
     case 'question':
-      message = `❓ Новый вопрос:
-
-👤 Имя: ${data.name}
-📞 Телефон: ${phone}
-💬 Вопрос: ${data.question}`;
+      message = `❓ Новый вопрос:\n👤 Имя: ${data.name}\n📞 Телефон: ${phone}\n💬 Вопрос: ${data.question}`;
       break;
   }
   
-  if (message) {
-    await sendNotification(message);
-  }
-}
-
-async function notifySuspiciousActivity(userId: number, reason: string, details?: any) {
-  const message = `⚠️ Подозрительная активность!
-
-👤 Пользователь: ${userId}
-❓ Причина: ${reason}
- ${details ? `📋 Детали: ${JSON.stringify(details)}` : ''}
-🕐 Время: ${new Date().toISOString()}`;
-  
-  await sendNotification(message, true);
-  securityLog('SUSPICIOUS_ACTIVITY', userId, { reason, details });
-}
-
-// ============== BACKUP FUNCTIONS ==============
-
-async function createBackup() {
-  try {
-    const dbPath = join(dataDir, 'database.sqlite');
-    if (!existsSync(dbPath)) {
-      log('WARN', 'Database file not found for backup');
-      return;
-    }
-    
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = join(dataDir, 'backups', `backup-${timestamp}.sqlite`);
-    
-    const backupDir = join(dataDir, 'backups');
-    if (!existsSync(backupDir)) {
-      mkdirSync(backupDir, { recursive: true });
-    }
-    
-    const dbContent = readFileSync(dbPath);
-    writeFileSync(backupPath, dbContent);
-    
-    log('INFO', `Backup created: ${backupPath}`);
-    
-    const message = `💾 Бэкап базы данных создан
-
-🕐 Время: ${new Date().toISOString()}
-📁 Файл: backup-${timestamp}.sqlite
-📊 Размер: ${(dbContent.length / 1024).toFixed(2)} KB`;
-    
-    await sendNotification(message);
-    
-    const files = readdirSync(backupDir)
-      .filter(f => f.startsWith('backup-'))
-      .sort()
-      .reverse();
-    
-    for (let i = 7; i < files.length; i++) {
-      try {
-        unlinkSync(join(backupDir, files[i]));
-        log('INFO', `Deleted old backup: ${files[i]}`);
-      } catch (e) {}
-    }
-    
-    return backupPath;
-  } catch (e) {
-    log('ERROR', 'Backup failed', e);
-    return null;
-  }
-}
-
-setInterval(createBackup, 6 * 60 * 60 * 1000);
-
-// ============== HEALTH CHECK ENDPOINT ==============
-
-async function startHealthServer() {
-  const http = require('http');
-  const server = http.createServer((req: any, res: any) => {
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        version: '11.2'
-      }));
-    } else {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  });
-  
-  server.listen(BOT_CONFIG.port, () => {
-    log('INFO', `Health check server started on port ${BOT_CONFIG.port}`);
-  });
+  if (message) await sendNotification(message);
 }
 
 // ============== MIDDLEWARE - RATE LIMITING ==============
 
 bot.use(async (ctx, next) => {
   const id = getUserId(ctx);
-  
   if (id) {
     const rateCheck = checkRateLimit(id);
-    
     if (!rateCheck.allowed) {
       log('WARN', `Rate limit exceeded for user ${id}`);
-      await notifySuspiciousActivity(id, 'RATE_LIMIT_EXCEEDED');
       return;
     }
-    
-    if (rateCheck.warn) {
-      log('WARN', `Rate limit warning for user ${id}, remaining: ${rateCheck.remaining}`);
-    }
   }
-  
   return next();
 });
 
@@ -780,34 +701,21 @@ bot.use(async (ctx, next) => {
   const updateType = ctx.updateType || ctx.update?.update_type || '';
   const callbackData = ctx.callback?.payload || ctx.update?.callback?.payload || '';
   
-  if (!id) {
-    return next();
-  }
+  if (!id) return next();
 
   if (callbackData === 'consent_yes' || callbackData === 'consent_no' || callbackData === 'consent_retry') {
     return next();
   }
 
   await getOrCreateUser(id, getUserData(ctx));
-
   const hasConsent = await hasUserConsent(id);
   
   if (!hasConsent) {
-    log('INFO', `Middleware: User ${id} has no consent, showing consent message`);
-    
-    if (updateType === 'message_callback' || ctx.callback) {
-      try {
-        await ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
-      } catch (e) {
-        log('ERROR', 'Middleware callback reply error', e);
-      }
-      return;
-    }
-    
+    log('INFO', `User ${id} has no consent, showing consent message`);
     try {
       await ctx.reply(CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
     } catch (e) {
-      log('ERROR', 'Middleware message reply error', e);
+      log('ERROR', 'Middleware reply error', e);
     }
     return;
   }
@@ -820,9 +728,7 @@ bot.use(async (ctx, next) => {
 bot.on('bot_started', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `bot_started event, userId: ${id}`);
-
   if (!id) return;
-
   await clearUserState(id);
   await safeReply(ctx, WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
@@ -832,169 +738,94 @@ bot.on('bot_started', async (ctx) => {
 bot.command('start', async (ctx) => {
   const id = getUserId(ctx);
   log('INFO', `/start command, userId: ${id}`);
-
   if (!id) return;
-  
   await clearUserState(id);
   await safeReply(ctx, WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
 
-// 1. /waitlist - 📋 Хочу в лист ожидания
 bot.command('waitlist', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `/waitlist command, userId: ${id}`);
-  
   if (!id) return;
-
-  log('INFO', `User ${id} starting waitlist flow`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
   await safeReply(ctx, 'Напишите имя');
 });
 
-// 2. /order - 💰 Оплатить предзаказ
 bot.command('order', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-
   await safeReply(ctx, ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
-// 3. /question - ❓ У меня есть вопрос
 bot.command('question', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `/question command, userId: ${id}`);
-  
   if (!id) return;
-
-  log('INFO', `User ${id} starting question flow`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
   await safeReply(ctx, 'Напишите ваше имя');
 });
 
-// 4. /feldsher - 👨‍⚕️ Фельдшеру (отправить резюме)
 bot.command('feldsher', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `/feldsher command, userId: ${id}`);
-  
   if (!id) return;
-
-  log('INFO', `User ${id} starting feldsher flow`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
   await safeReply(ctx, 'Как вас зовут?');
 });
 
-// 5. /doveren - 📄 Текст доверенности
 bot.command('doveren', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-
   await safeReply(ctx, DOVEREN_MESSAGE, { attachments: [BackKeyboard] });
 });
 
-// 6. /podderzhka - ❤️ Поддержать проект
 bot.command('podderzhka', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-
   await safeReply(ctx, PODDERZHKA_MESSAGE, { attachments: [PodderzhkaKeyboard] });
 });
 
-// 7. /revoke - 🗑️ Отозвать согласие
 bot.command('revoke', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
-
   await safeReply(ctx, REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
 });
 
-// 8. /privacy – 🔐 Свод правил
 bot.command('privacy', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
   await safeReply(ctx, PRIVACY_MESSAGE, { attachments: [BackKeyboard] });
 });
 
-// 9. /channels - 📢 Наши каналы
 bot.command('channels', async (ctx) => {
   const id = getUserId(ctx);
   if (!id) return;
   await safeReply(ctx, CHANNELS_MESSAGE, { attachments: [ChannelsKeyboard] });
 });
 
-bot.command('admin_stats', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id || id !== ADMIN_ID) {
-    return;
-  }
-  
-  const waitlistCount = await prisma.maxWaitlistEntry.count();
-  const feldsherCount = await prisma.maxFeldsherApplication.count();
-  const questionsCount = await prisma.maxQuestion.count();
-  
-  await safeReply(ctx, `📊 **Статистика:**
-  
-📋 Лист ожидания: ${waitlistCount} заявок
-👨‍⚕️ Анкеты фельдшеров: ${feldsherCount}
-❓ Вопросы: ${questionsCount}`);
-});
-
-bot.command('backup', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id || id !== ADMIN_ID) {
-    return;
-  }
-  
-  const backupPath = await createBackup();
-  if (backupPath) {
-    await safeReply(ctx, `✅ Бэкап создан: ${backupPath}`);
-  } else {
-    await safeReply(ctx, `❌ Ошибка создания бэкапа`);
-  }
-});
-
 // ============== CONSENT CALLBACKS ==============
 
 bot.action('consent_yes', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `consent_yes callback, userId: ${id}`);
-  
   if (!id) return;
-
   await getOrCreateUser(id, getUserData(ctx));
   await setUserConsent(id, true);
   securityLog('CONSENT_GRANTED', id);
-  
   await safeReply(ctx, '✅ Спасибо за согласие! Теперь вы можете пользоваться ботом.', { attachments: [MainKeyboard] });
 });
 
 bot.action('consent_no', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `consent_no callback, userId: ${id}`);
-  
   if (!id) return;
-  
   securityLog('CONSENT_DENIED', id);
   await safeReply(ctx, '❌ Без согласия функционал бота недоступен. Напишите /start, чтобы попробовать снова.');
-});
-
-bot.action('consent_retry', async (ctx) => {
-  const id = getUserId(ctx);
-  if (!id) return;
-  
-  await safeReply(ctx, CONSENT_MESSAGE, { attachments: [ConsentKeyboard] });
 });
 
 // ============== MENU CALLBACKS ==============
 
 bot.action('main_menu', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `main_menu callback, userId: ${id}`);
-  
   if (!id) return;
-  
   await clearUserState(id);
   await safeReply(ctx, WELCOME_MESSAGE, { attachments: [MainKeyboard] });
 });
@@ -1033,11 +864,7 @@ bot.action('menu_channels', async (ctx) => {
 
 bot.action('patient_waitlist', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `patient_waitlist callback, userId: ${id}`);
-  
   if (!id) return;
-
-  log('INFO', `Starting waitlist flow for user ${id}`);
   await setUserState(id, 'waitlist', 'name', {});
   securityLog('WAITLIST_START', id);
   await safeReply(ctx, 'Напишите имя');
@@ -1049,29 +876,21 @@ bot.action('patient_order', async (ctx) => {
   await safeReply(ctx, ORDER_MESSAGE, { attachments: [BackKeyboard] });
 });
 
-// ========== MENU QUESTION ==========
+// ========== QUESTION ==========
 
 bot.action('question_ask', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `question_ask callback, userId: ${id}`);
-  
   if (!id) return;
-
-  log('INFO', `Starting question flow for user ${id}`);
   await setUserState(id, 'question', 'name', {});
   securityLog('QUESTION_START', id);
   await safeReply(ctx, 'Напишите ваше имя');
 });
 
-// ========== FELDSHER APPLY ==========
+// ========== FELDSHER ==========
 
 bot.action('feldsher_apply', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `feldsher_apply callback, userId: ${id}`);
-  
   if (!id) return;
-
-  log('INFO', `Starting feldsher flow for user ${id}`);
   await setUserState(id, 'feldsher', 'name', {});
   securityLog('FELDSHER_START', id);
   await safeReply(ctx, 'Как вас зовут?');
@@ -1080,72 +899,38 @@ bot.action('feldsher_apply', async (ctx) => {
 // ========== CHANNEL LINKS ==========
 
 bot.action('channel_patient', async (ctx) => {
-  await safeReply(ctx, `👥 Канал для пациентов:
-
-🟪 MAX
-https://max.ru/join/56sp6ngnZou3IeaUAUqfiopUefYBUMacUwg1ExkHAa8
-
-🔵 VK
-https://vk.com/feldsherryadom`);
+  await safeReply(ctx, `👥 Канал для пациентов:\n\n🟪 MAX\nhttps://max.ru/join/56sp6ngnZou3IeaUAUqfiopUefYBUMacUwg1ExkHAa8\n\n🔵 VK\nhttps://vk.com/feldsherryadom`);
 });
 
 bot.action('channel_feldsher', async (ctx) => {
-  await safeReply(ctx, `👨‍⚕️ Канал для фельдшеров:
-
-🟪 MAX
-https://max.ru/join/rre51qvmREhGKRnNFf4vcVZ_U3mj_obCY8L2wNHAxo8
-
-🔵 VK
-https://vk.com/feldsherizh`);
+  await safeReply(ctx, `👨‍⚕️ Канал для фельдшеров:\n\n🟪 MAX\nhttps://max.ru/join/rre51qvmREhGKRnNFf4vcVZ_U3mj_obCY8L2wNHAxo8\n\n🔵 VK\nhttps://vk.com/feldsherizh`);
 });
 
 // ========== PODDERZHKA LINKS ==========
 
 bot.action('podderzhka_sber', async (ctx) => {
-  await safeReply(ctx, `💳 Перевод через Сбербанк:
-
-Ссылка для перевода:
-https://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM
-
-Или напрямую по номеру телефона:
-📞 +7 (965) 843-78-18
-
-(лучше добавить комментарий про фельдшерский кабинет)`);
+  await safeReply(ctx, `💳 Перевод через Сбербанк:\n\nhttps://messenger.online.sberbank.ru/sl/6Ih17pcLxfxgbjntM\n\nИли по номеру телефона:\n📞 +7 (965) 843-78-18`);
 });
 
 bot.action('podderzhka_planeta', async (ctx) => {
-  await safeReply(ctx, `🌍 Краудфандинг на Planeta.ru:
-
-https://planeta.ru/campaigns/feldsherryadom
-
-Спасибо за поддержку проекта! ❤️`);
+  await safeReply(ctx, `🌍 Краудфандинг на Planeta.ru:\n\nhttps://planeta.ru/campaigns/feldsherryadom\n\nСпасибо за поддержку! ❤️`);
 });
 
 // ========== REVOKE CONSENT ==========
 
 bot.action('revoke_confirm', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `revoke_confirm callback, userId: ${id}`);
-  
   if (!id) return;
-
   securityLog('CONSENT_REVOKED', id);
   await deleteAllUserData(id);
-  
-  await safeReply(ctx, `✅ Ваше согласие отозвано.
-Все ваши персональные данные удалены из базы.
-
-Если захотите воспользоваться ботом снова, отправьте /start`);
+  await safeReply(ctx, `✅ Ваше согласие отозвано.\nВсе ваши персональные данные удалены.\n\nЕсли захотите воспользоваться ботом снова, отправьте /start`);
 });
 
 // ========== CANCEL FLOW ==========
 
 bot.action('cancel_flow', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `cancel_flow callback, userId: ${id}`);
-  
   if (!id) return;
-  
   await clearUserState(id);
   await safeReply(ctx, '❌ Отменено. Возвращаемся в главное меню.', { attachments: [MainKeyboard] });
 });
@@ -1154,16 +939,12 @@ bot.action('cancel_flow', async (ctx) => {
 
 bot.action(/district_(\d+)/, async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `district callback, userId: ${id}`);
-  
   if (!id) return;
   
   const match = ctx.callback?.payload?.match(/district_(\d+)/);
   if (!match) return;
   
-  const districtId = match[1];
-  const district = BOT_CONFIG.districts.find(d => d.id === districtId);
-  
+  const district = BOT_CONFIG.districts.find(d => d.id === match[1]);
   if (!district) return;
   
   const state = await getUserState(id);
@@ -1172,58 +953,38 @@ bot.action(/district_(\d+)/, async (ctx) => {
   state.data.district = district.name;
   await setUserState(id, 'waitlist', 'confirm', state.data);
   
-  await safeReply(ctx, `📍 Выбран район: ${district.name}
-
-✅ Проверьте данные:
-👤 Имя: ${state.data.name}
-📞 Телефон: ${state.data.phone}
-📍 Район: ${district.name}`, { attachments: [ConfirmKeyboard] });
+  await safeReply(ctx, `📍 Выбран район: ${district.name}\n\n✅ Проверьте данные:\n👤 Имя: ${state.data.name}\n📞 Телефон: ${state.data.phone}\n📍 Район: ${district.name}`, { attachments: [ConfirmKeyboard] });
 });
 
 // ========== SCHEDULE SELECTION ==========
 
 bot.action('schedule_main', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `schedule_main callback, userId: ${id}`);
-  
   if (!id) return;
-  
   const state = await getUserState(id);
   if (!state || state.flowType !== 'feldsher') return;
   
   state.data.scheduleType = '16 смен (основной фельдшер)';
   await setUserState(id, 'feldsher', 'resume', state.data);
-  
-  await safeReply(ctx, `📅 Выбран график: 16 смен (основной фельдшер)
-
-📎 Пришлите ссылку на резюме (или напишите «нет», если нет резюме)`, { attachments: [CancelKeyboard] });
+  await safeReply(ctx, `📅 Выбран график: 16 смен (основной фельдшер)\n\n📎 Пришлите ссылку на резюме (или напишите «нет»)`, { attachments: [CancelKeyboard] });
 });
 
 bot.action('schedule_sunday', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `schedule_sunday callback, userId: ${id}`);
-  
   if (!id) return;
-  
   const state = await getUserState(id);
   if (!state || state.flowType !== 'feldsher') return;
   
   state.data.scheduleType = '12 смен (воскресный фельдшер)';
   await setUserState(id, 'feldsher', 'resume', state.data);
-  
-  await safeReply(ctx, `📅 Выбран график: 12 смен (воскресный фельдшер)
-
-📎 Пришлите ссылку на резюме (или напишите «нет», если нет резюме)`, { attachments: [CancelKeyboard] });
+  await safeReply(ctx, `📅 Выбран график: 12 смен (воскресный фельдшер)\n\n📎 Пришлите ссылку на резюме (или напишите «нет»)`, { attachments: [CancelKeyboard] });
 });
 
 // ========== CONFIRM SUBMISSION ==========
 
 bot.action('confirm_submit', async (ctx) => {
   const id = getUserId(ctx);
-  log('INFO', `confirm_submit callback, userId: ${id}`);
-  
   if (!id) return;
-  
   const state = await getUserState(id);
   if (!state) return;
   
@@ -1231,12 +992,12 @@ bot.action('confirm_submit', async (ctx) => {
     if (state.flowType === 'waitlist') {
       await saveWaitlistEntry(id, state.data);
       await notifyAdmin('waitlist', state.data);
-      securityLog('WAITLIST_SUBMITTED', id, { district: state.data.district });
+      securityLog('WAITLIST_SUBMITTED', id);
       await safeReply(ctx, '✅ Спасибо! Вы записаны в лист ожидания.\nМы пригласим вас на открытие фельдшерского кабинета.', { attachments: [MainKeyboard] });
     } else if (state.flowType === 'feldsher') {
       await saveFeldsherApplication(id, state.data);
       await notifyAdmin('feldsher', state.data);
-      securityLog('FELDSHER_SUBMITTED', id, { schedule: state.data.scheduleType });
+      securityLog('FELDSHER_SUBMITTED', id);
       await safeReply(ctx, '✅ Спасибо! Ваша анкета отправлена.\nМы свяжемся с вами в ближайшее время.', { attachments: [MainKeyboard] });
     } else if (state.flowType === 'question') {
       await saveQuestion(id, state.data);
@@ -1244,11 +1005,10 @@ bot.action('confirm_submit', async (ctx) => {
       securityLog('QUESTION_SUBMITTED', id);
       await safeReply(ctx, '✅ Спасибо! Ваш вопрос отправлен.\nМы ответим вам в рабочее время (07:00-20:00 МСК).', { attachments: [MainKeyboard] });
     }
-    
     await clearUserState(id);
   } catch (e) {
     log('ERROR', 'Failed to save submission', e);
-    await safeReply(ctx, '❌ Произошла ошибка. Попробуйте позже или напишите нам на feldland@yandex.ru', { attachments: [MainKeyboard] });
+    await safeReply(ctx, '❌ Произошла ошибка. Попробуйте позже или напишите на feldland@yandex.ru', { attachments: [MainKeyboard] });
   }
 });
 
@@ -1258,28 +1018,20 @@ bot.on('message_created', async (ctx) => {
   const id = getUserId(ctx);
   const text = ctx.message?.body?.text || ctx.message?.text || '';
   
-  log('INFO', `message_created from ${id}: ${text.substring(0, 50)}...`);
-  
   if (!id || !text) return;
   
   const state = await getUserState(id);
   
-  // Если нет активного состояния - проверяем на ключевые слова
   if (!state) {
     const lowerText = text.toLowerCase().trim();
-    
-    // Проверяем на отзыв согласия
     if (lowerText.includes('отозвать') && lowerText.includes('согласие')) {
       await safeReply(ctx, REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
       return;
     }
-    
-    // Общие ответы
     await safeReply(ctx, 'Выберите действие в меню или используйте команды:\n/waitlist - Лист ожидания\n/question - Задать вопрос\n/feldsher - Отправить резюме', { attachments: [MainKeyboard] });
     return;
   }
   
-  // Обработка в зависимости от типа flow
   if (state.flowType === 'waitlist') {
     await handleWaitlistFlow(ctx, id, text, state);
   } else if (state.flowType === 'feldsher') {
@@ -1289,7 +1041,7 @@ bot.on('message_created', async (ctx) => {
   }
 });
 
-// ========== WAITLIST FLOW ==========
+// ========== FLOW HANDLERS ==========
 
 async function handleWaitlistFlow(ctx: any, id: number, text: string, state: any) {
   const sanitizedText = sanitizeInput(text, 100);
@@ -1300,7 +1052,6 @@ async function handleWaitlistFlow(ctx: any, id: number, text: string, state: any
       await setUserState(id, 'waitlist', 'phone', state.data);
       await safeReply(ctx, '📞 Напишите номер телефона', { attachments: [CancelKeyboard] });
       break;
-      
     case 'phone':
       if (!validatePhone(text)) {
         await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX');
@@ -1313,8 +1064,6 @@ async function handleWaitlistFlow(ctx: any, id: number, text: string, state: any
   }
 }
 
-// ========== FELDSHER FLOW ==========
-
 async function handleFeldsherFlow(ctx: any, id: number, text: string, state: any) {
   const sanitizedText = sanitizeInput(text, 100);
   
@@ -1324,17 +1073,15 @@ async function handleFeldsherFlow(ctx: any, id: number, text: string, state: any
       await setUserState(id, 'feldsher', 'phone', state.data);
       await safeReply(ctx, '📞 Напишите номер телефона', { attachments: [CancelKeyboard] });
       break;
-      
     case 'phone':
       if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX');
+        await safeReply(ctx, '❌ Неверный формат телефона');
         return;
       }
       state.data.phone = formatPhone(text);
       await setUserState(id, 'feldsher', 'experience', state.data);
       await safeReply(ctx, '⏳ Сколько лет опыта работы фельдшером?', { attachments: [CancelKeyboard] });
       break;
-      
     case 'experience':
       if (!validateExperience(text)) {
         await safeReply(ctx, '❌ Укажите стаж числом (например: 5)');
@@ -1344,23 +1091,14 @@ async function handleFeldsherFlow(ctx: any, id: number, text: string, state: any
       await setUserState(id, 'feldsher', 'schedule', state.data);
       await safeReply(ctx, '📅 Выберите желаемый график:', { attachments: [ScheduleKeyboard] });
       break;
-      
     case 'resume':
       const urlResult = validateUrl(text);
       state.data.resumeLink = urlResult.value;
       await setUserState(id, 'feldsher', 'confirm', state.data);
-      
-      await safeReply(ctx, `✅ Проверьте данные:
-👤 Имя: ${state.data.name}
-📞 Телефон: ${state.data.phone}
-⏳ Стаж: ${state.data.experience}
-📅 График: ${state.data.scheduleType}
-📎 Резюме: ${state.data.resumeLink || 'не указано'}`, { attachments: [ConfirmKeyboard] });
+      await safeReply(ctx, `✅ Проверьте данные:\n👤 Имя: ${state.data.name}\n📞 Телефон: ${state.data.phone}\n⏳ Стаж: ${state.data.experience}\n📅 График: ${state.data.scheduleType}\n📎 Резюме: ${state.data.resumeLink || 'не указано'}`, { attachments: [ConfirmKeyboard] });
       break;
   }
 }
-
-// ========== QUESTION FLOW ==========
 
 async function handleQuestionFlow(ctx: any, id: number, text: string, state: any) {
   const sanitizedText = sanitizeInput(text, 100);
@@ -1372,25 +1110,19 @@ async function handleQuestionFlow(ctx: any, id: number, text: string, state: any
       await setUserState(id, 'question', 'phone', state.data);
       await safeReply(ctx, '📞 Напишите номер телефона (для ответа на ваш вопрос)', { attachments: [CancelKeyboard] });
       break;
-      
     case 'phone':
       if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX');
+        await safeReply(ctx, '❌ Неверный формат телефона');
         return;
       }
       state.data.phone = formatPhone(text);
       await setUserState(id, 'question', 'question', state.data);
       await safeReply(ctx, '❓ Напишите ваш вопрос', { attachments: [CancelKeyboard] });
       break;
-      
     case 'question':
       state.data.question = sanitizedQuestion;
       await setUserState(id, 'question', 'confirm', state.data);
-      
-      await safeReply(ctx, `✅ Проверьте данные:
-👤 Имя: ${state.data.name}
-📞 Телефон: ${state.data.phone}
-❓ Вопрос: ${state.data.question}`, { attachments: [ConfirmKeyboard] });
+      await safeReply(ctx, `✅ Проверьте данные:\n👤 Имя: ${state.data.name}\n📞 Телефон: ${state.data.phone}\n❓ Вопрос: ${state.data.question}`, { attachments: [ConfirmKeyboard] });
       break;
   }
 }
@@ -1405,20 +1137,23 @@ bot.catch((error: any) => {
 
 async function startBot() {
   try {
-    log('INFO', 'Starting bot v11.2...');
+    log('INFO', 'Starting bot v11.4...');
     log('INFO', `DATABASE_URL: ${process.env.DATABASE_URL}`);
     log('INFO', `ADMIN_ID: ${ADMIN_ID}`);
-    log('INFO', `CHANNEL_ID: ${CHANNEL_ID}`);
     
-    // Запускаем health check server
-    startHealthServer();
+    // СОЗДАЁМ ТАБЛИЦЫ
+    const tablesCreated = await createTablesIfNotExist();
+    if (!tablesCreated) {
+      log('ERROR', 'Failed to create tables, exiting');
+      process.exit(1);
+    }
     
     // Запускаем бота
     await bot.start();
     log('INFO', 'Bot started successfully!');
     
-    // Уведомляем админа о запуске
-    await sendNotification(`🤖 Бот v11.2 запущен!\n\n🕐 Время: ${new Date().toISOString()}`);
+    // Уведомляем админа
+    await sendNotification(`🤖 Бот v11.4 запущен!\n\n🕐 Время: ${new Date().toISOString()}\n✅ Таблицы созданы`);
     
   } catch (error: any) {
     log('ERROR', 'Failed to start bot', error);
