@@ -1,6 +1,6 @@
 {
   "name": "feldsher-max-bot",
-  "version": "11.8",
+  "version": "11.9",
   "description": "MAX Messenger Bot for Feldsher.Ryadom project",
   "main": "bot.ts",
   "scripts": {
