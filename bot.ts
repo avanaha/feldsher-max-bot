@@ -1,13 +1,11 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 11.9
+ * Version: 11.10
  * 
- * v11.9:
- * - ИСПРАВЛЕНО: Быстрое меню по / настроено через setMyCommands()
- * - ИСПРАВЛЕНО: /privacy описание "Свод правил"
- * - ИСПРАВЛЕНО: Кнопка ❌ Отмена на ВСЕХ этапах анкет
- * - ИСПРАВЛЕНО: Резюме - только ссылка или "нет"
+ * v11.10:
+ * - УБРАНО: Быстрое меню по / (оставлено только главное меню)
+ * - ИСПРАВЛЕНО: Сообщение об ошибке для резюме
  */
 
 import { Bot, Keyboard } from '@maxhub/max-bot-api';
@@ -192,12 +190,12 @@ function validateUrl(text: string): { valid: boolean; isUrl: boolean; value: str
     
     // Проверяем что это действительно URL с доменом
     if (!url.hostname.includes('.')) {
-      return { valid: false, isUrl: false, value: '', error: 'Неверный формат ссылки' };
+      return { valid: false, isUrl: false, value: '', error: 'В ответ можно отправить только ссылку на ваше резюме, либо написать боту слово: нет' };
     }
     
     return { valid: true, isUrl: true, value: url.href };
   } catch (e) {
-    return { valid: false, isUrl: false, value: '', error: 'Пришлите ссылку на резюме или напишите «нет»' };
+    return { valid: false, isUrl: false, value: '', error: 'В ответ можно отправить только ссылку на ваше резюме, либо написать боту слово: нет' };
   }
 }
 
@@ -826,7 +824,7 @@ async function startHealthServer() {
       res.end(JSON.stringify({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '11.9'
+        version: '11.10'
       }));
     } else {
       res.writeHead(404);
@@ -839,27 +837,7 @@ async function startHealthServer() {
   });
 }
 
-// ============== SET BOT COMMANDS (БЫСТРОЕ МЕНЮ) ==============
-async function setBotCommands() {
-  try {
-    // Команды полностью совпадают с главным меню
-    await bot.api.setMyCommands([
-      { command: 'start', description: 'Главное меню' },
-      { command: 'waitlist', description: 'Хочу в лист ожидания' },
-      { command: 'order', description: 'Оплатить предзаказ' },
-      { command: 'question', description: 'У меня есть вопрос' },
-      { command: 'feldsher', description: 'Фельдшеру (отправить резюме)' },
-      { command: 'doveren', description: 'Текст доверенности' },
-      { command: 'podderzhka', description: 'Поддержать проект' },
-      { command: 'revoke', description: 'Отозвать согласие' },
-      { command: 'privacy', description: 'Свод правил' },
-      { command: 'channels', description: 'Наши каналы' },
-    ]);
-    log('INFO', 'Bot commands menu set successfully');
-  } catch (e) {
-    log('ERROR', 'Failed to set bot commands', e);
-  }
-}
+// Быстрое меню по / УБРАНО - используется только главное меню
 
 // ============== MIDDLEWARE - RATE LIMITING ==============
 
@@ -1537,7 +1515,7 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 async function startBot() {
   try {
-    log('INFO', 'Starting bot v11.9...');
+    log('INFO', 'Starting bot v11.10...');
     log('INFO', `ADMIN_ID: ${ADMIN_ID}`);
     log('INFO', `CHANNEL_ID: ${CHANNEL_ID}`);
     
@@ -1548,8 +1526,7 @@ async function startBot() {
       process.exit(1);
     }
     
-    // Устанавливаем команды бота (быстрое меню)
-    await setBotCommands();
+    // Быстрое меню УБРАНО - используется только главное меню
     
     // Запускаем health check server
     startHealthServer();
@@ -1559,17 +1536,14 @@ async function startBot() {
     log('INFO', 'Bot started successfully!');
     
     // Уведомляем админа о запуске
-    await sendNotification(`🤖 Бот v11.9 запущен!
+    await sendNotification(`🤖 Бот v11.10 запущен!
 
 🕐 Время: ${new Date().toISOString()}
 📊 База данных: OK
-✅ Исправлены все 4 ошибки
 
 📝 Изменения:
-• Быстрое меню по / настроено
-• /privacy = Свод правил
-• ❌ Отмена на всех этапах
-• Резюме: ссылка или «нет»`);
+• Быстрое меню по / УБРАНО
+• Резюме: исправлено сообщение об ошибке`);
     
   } catch (error: any) {
     log('ERROR', 'Failed to start bot', error);
