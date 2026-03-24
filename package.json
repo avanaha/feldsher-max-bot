@@ -1,8 +1,12 @@
 {
   "name": "feldsher-max-bot",
-  "version": "11.7",
+  "version": "11.8",
+  "description": "MAX Messenger Bot for Feldsher.Ryadom project",
   "main": "bot.ts",
-  "scripts": { "start": "bun run bot.ts" },
+  "scripts": {
+    "start": "bun run bot.ts",
+    "dev": "bun --watch run bot.ts"
+  },
   "dependencies": {
     "@maxhub/max-bot-api": "^0.2.2",
     "@prisma/client": "^5.22.0"
