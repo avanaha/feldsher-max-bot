@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 11.10
+ * Version: 11.11
  * 
- * v11.10:
- * - УБРАНО: Быстрое меню по / (оставлено только главное меню)
- * - ИСПРАВЛЕНО: Сообщение об ошибке для резюме
+ * v11.11:
+ * - ИСПРАВЛЕНО: validateUrl теперь отвергает IP-адреса и числовые домены
+ * - ИСПРАВЛЕНО: Очистка быстрого меню по / при запуске бота
+ * - УПРОЩЕНО: Принимается только ссылка или слово "нет"
  */
 
 import { Bot, Keyboard } from '@maxhub/max-bot-api';
@@ -179,17 +180,29 @@ function validateUrl(text: string): { valid: boolean; isUrl: boolean; value: str
   
   const trimmed = text.trim().toLowerCase();
   
-  // Разрешаем "нет" или "нет резюме"
-  if (trimmed === 'нет' || trimmed === 'нет резюме' || trimmed === '-' || trimmed === 'нету') {
+  // Разрешаем ТОЛЬКО слово "нет" (в любом регистре)
+  if (trimmed === 'нет') {
     return { valid: true, isUrl: false, value: 'Резюме не предоставлено' };
   }
   
   // Проверяем что это реальная ссылка
+  let urlToCheck = text.trim();
+  
+  // Если не начинается с http:// или https://, добавляем https://
+  if (!urlToCheck.toLowerCase().startsWith('http://') && !urlToCheck.toLowerCase().startsWith('https://')) {
+    urlToCheck = 'https://' + urlToCheck;
+  }
+  
   try {
-    const url = new URL(text.startsWith('http') ? text : `https://${text}`);
+    const url = new URL(urlToCheck);
     
-    // Проверяем что это действительно URL с доменом
+    // Проверяем что hostname содержит точку (домен)
     if (!url.hostname.includes('.')) {
+      return { valid: false, isUrl: false, value: '', error: 'В ответ можно отправить только ссылку на ваше резюме, либо написать боту слово: нет' };
+    }
+    
+    // Проверяем что hostname содержит хотя бы одну букву (исключаем IP-адреса и числовые домены)
+    if (!/[a-zA-Z]/.test(url.hostname)) {
       return { valid: false, isUrl: false, value: '', error: 'В ответ можно отправить только ссылку на ваше резюме, либо написать боту слово: нет' };
     }
     
@@ -221,7 +234,6 @@ function validateExperience(text: string): boolean {
   const years = parseInt(digits);
   return !isNaN(years) && years >= 0 && years <= 50;
 }
-
 // ============== PRISMA ==============
 const prisma = new PrismaClient({ log: ['error'] });
 
@@ -466,7 +478,6 @@ async function saveQuestion(maxId: number, data: any) {
     },
   });
 }
-
 // ============== KEYBOARDS ==============
 
 const ConsentKeyboard = Keyboard.inlineKeyboard([
@@ -647,7 +658,6 @@ const REVOKE_MESSAGE = `Вы можете отозвать согласие на
 Если вы отзовёте согласие, то все ваши данные будут очищены. Чтобы использовать бота снова, отправьте ему команду /start.
 
 Вы желаете отозвать согласие?`;
-
 // ============== HELPER FUNCTIONS ==============
 
 function getUserId(ctx: any): number | null {
@@ -824,7 +834,7 @@ async function startHealthServer() {
       res.end(JSON.stringify({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '11.10'
+        version: '11.11'
       }));
     } else {
       res.writeHead(404);
@@ -902,7 +912,6 @@ bot.use(async (ctx, next) => {
 
   return next();
 });
-
 // ============== BOT STARTED ==============
 
 bot.on('bot_started', async (ctx) => {
@@ -1339,7 +1348,6 @@ bot.action('confirm_submit', async (ctx) => {
     await safeReply(ctx, '❌ Произошла ошибка. Попробуйте позже или напишите нам на feldland@yandex.ru', { attachments: [MainKeyboard] });
   }
 });
-
 // ============== TEXT MESSAGE HANDLER ==============
 
 bot.on('message_created', async (ctx) => {
@@ -1357,140 +1365,148 @@ bot.on('message_created', async (ctx) => {
     const lowerText = text.toLowerCase().trim();
     
     // Проверяем на отзыв согласия
-    if (lowerText.includes('отозвать') && lowerText.includes('согласие')) {
+    if (lowerText.includes('отозвать согласие') || lowerText.includes('отзываю согласие')) {
       await safeReply(ctx, REVOKE_MESSAGE, { attachments: [RevokeKeyboard] });
       return;
     }
     
-    // Общие ответы
-    await safeReply(ctx, 'Выберите действие в меню или используйте команды:\n/waitlist - Лист ожидания\n/question - Задать вопрос\n/feldsher - Отправить резюме', { attachments: [MainKeyboard] });
+    // Проверяем на вопросы
+    if (lowerText.includes('вопрос') || lowerText.includes('?')) {
+      await safeReply(ctx, 'Выберите «❓ У меня есть вопрос» в главном меню, чтобы задать вопрос.', { attachments: [MainKeyboard] });
+      return;
+    }
+    
+    // По умолчанию показываем главное меню
+    await safeReply(ctx, 'Выберите действие:', { attachments: [MainKeyboard] });
     return;
   }
   
-  // Обработка в зависимости от типа flow
-  if (state.flowType === 'waitlist') {
-    await handleWaitlistFlow(ctx, id, text, state);
-  } else if (state.flowType === 'feldsher') {
-    await handleFeldsherFlow(ctx, id, text, state);
-  } else if (state.flowType === 'question') {
-    await handleQuestionFlow(ctx, id, text, state);
-  }
-});
-
-// ========== WAITLIST FLOW ==========
-
-async function handleWaitlistFlow(ctx: any, id: number, text: string, state: any) {
-  const sanitizedText = sanitizeInput(text, 100);
+  // Обработка состояний анкет
+  const sanitizedText = sanitizeInput(text);
   
-  switch (state.currentStep) {
-    case 'name':
+  // ========== WAITLIST FLOW ==========
+  if (state.flowType === 'waitlist') {
+    if (state.currentStep === 'name') {
+      if (sanitizedText.length < 2) {
+        await safeReply(ctx, '❌ Имя слишком короткое. Попробуйте ещё раз.', { attachments: [CancelKeyboard] });
+        return;
+      }
       state.data.name = sanitizedText;
       await setUserState(id, 'waitlist', 'phone', state.data);
       await safeReply(ctx, '📞 Напишите номер телефона', { attachments: [CancelKeyboard] });
-      break;
-      
-    case 'phone':
-      if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX', { attachments: [CancelKeyboard] });
+      return;
+    }
+    
+    if (state.currentStep === 'phone') {
+      if (!validatePhone(sanitizedText)) {
+        await safeReply(ctx, '❌ Неверный формат телефона. Введите номер в формате +7 (XXX) XXX-XX-XX', { attachments: [CancelKeyboard] });
         return;
       }
-      state.data.phone = formatPhone(text);
+      state.data.phone = formatPhone(sanitizedText);
       await setUserState(id, 'waitlist', 'district', state.data);
-      await safeReply(ctx, '📍 Выберите район:', { attachments: [DistrictsKeyboard] });
-      break;
+      await safeReply(ctx, '📍 Выберите район', { attachments: [DistrictsKeyboard] });
+      return;
+    }
   }
-}
-
-// ========== FELDSHER FLOW ==========
-
-async function handleFeldsherFlow(ctx: any, id: number, text: string, state: any) {
-  const sanitizedText = sanitizeInput(text, 100);
   
-  switch (state.currentStep) {
-    case 'name':
+  // ========== FELDSHER FLOW ==========
+  if (state.flowType === 'feldsher') {
+    if (state.currentStep === 'name') {
+      if (sanitizedText.length < 2) {
+        await safeReply(ctx, '❌ Имя слишком короткое. Попробуйте ещё раз.', { attachments: [CancelKeyboard] });
+        return;
+      }
       state.data.name = sanitizedText;
       await setUserState(id, 'feldsher', 'phone', state.data);
       await safeReply(ctx, '📞 Напишите номер телефона', { attachments: [CancelKeyboard] });
-      break;
-      
-    case 'phone':
-      if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX', { attachments: [CancelKeyboard] });
+      return;
+    }
+    
+    if (state.currentStep === 'phone') {
+      if (!validatePhone(sanitizedText)) {
+        await safeReply(ctx, '❌ Неверный формат телефона. Введите номер в формате +7 (XXX) XXX-XX-XX', { attachments: [CancelKeyboard] });
         return;
       }
-      state.data.phone = formatPhone(text);
+      state.data.phone = formatPhone(sanitizedText);
       await setUserState(id, 'feldsher', 'experience', state.data);
       await safeReply(ctx, '⏳ Сколько лет опыта работы фельдшером?', { attachments: [CancelKeyboard] });
-      break;
-      
-    case 'experience':
-      if (!validateExperience(text)) {
-        await safeReply(ctx, '❌ Укажите стаж числом (например: 5)', { attachments: [CancelKeyboard] });
+      return;
+    }
+    
+    if (state.currentStep === 'experience') {
+      if (!validateExperience(sanitizedText)) {
+        await safeReply(ctx, '❌ Укажите стаж в годах (от 0 до 50)', { attachments: [CancelKeyboard] });
         return;
       }
-      state.data.experience = text.replace(/\D/g, '') + ' лет';
+      const digits = sanitizedText.replace(/\D/g, '');
+      state.data.experience = `${digits} лет`;
       await setUserState(id, 'feldsher', 'schedule', state.data);
-      await safeReply(ctx, '📅 Выберите желаемый график:', { attachments: [ScheduleKeyboard] });
-      break;
-      
-    case 'resume':
-      const urlResult = validateUrl(text);
-      if (!urlResult.valid) {
-        await safeReply(ctx, `❌ ${urlResult.error}`, { attachments: [CancelKeyboard] });
+      await safeReply(ctx, '📅 Выберите желаемый график работы', { attachments: [ScheduleKeyboard] });
+      return;
+    }
+    
+    if (state.currentStep === 'resume') {
+      const validation = validateUrl(sanitizedText);
+      if (!validation.valid) {
+        await safeReply(ctx, `❌ ${validation.error}`, { attachments: [CancelKeyboard] });
         return;
       }
-      state.data.resumeLink = urlResult.value;
+      state.data.resumeLink = validation.value;
       await setUserState(id, 'feldsher', 'confirm', state.data);
-      
       await safeReply(ctx, `✅ Проверьте данные:
+
 👤 Имя: ${state.data.name}
 📞 Телефон: ${state.data.phone}
 ⏳ Стаж: ${state.data.experience}
 📅 График: ${state.data.scheduleType}
-📎 Резюме: ${state.data.resumeLink || 'не указано'}`, { attachments: [ConfirmKeyboard] });
-      break;
+📎 Резюме: ${state.data.resumeLink}`, { attachments: [ConfirmKeyboard] });
+      return;
+    }
   }
-}
-
-// ========== QUESTION FLOW ==========
-
-async function handleQuestionFlow(ctx: any, id: number, text: string, state: any) {
-  const sanitizedText = sanitizeInput(text, 100);
-  const sanitizedQuestion = sanitizeInput(text, MAX_QUESTION_LENGTH);
   
-  switch (state.currentStep) {
-    case 'name':
-      state.data.name = sanitizedText;
-      await setUserState(id, 'question', 'phone', state.data);
-      await safeReply(ctx, '📞 Напишите номер телефона (для ответа на ваш вопрос)', { attachments: [CancelKeyboard] });
-      break;
-      
-    case 'phone':
-      if (!validatePhone(text)) {
-        await safeReply(ctx, '❌ Неверный формат телефона. Напишите номер в формате +7XXXXXXXXXX', { attachments: [CancelKeyboard] });
+  // ========== QUESTION FLOW ==========
+  if (state.flowType === 'question') {
+    if (state.currentStep === 'name') {
+      if (sanitizedText.length < 2) {
+        await safeReply(ctx, '❌ Имя слишком короткое. Попробуйте ещё раз.', { attachments: [CancelKeyboard] });
         return;
       }
-      state.data.phone = formatPhone(text);
+      state.data.name = sanitizedText;
+      await setUserState(id, 'question', 'phone', state.data);
+      await safeReply(ctx, '📞 Напишите номер телефона для связи', { attachments: [CancelKeyboard] });
+      return;
+    }
+    
+    if (state.currentStep === 'phone') {
+      if (!validatePhone(sanitizedText)) {
+        await safeReply(ctx, '❌ Неверный формат телефона. Введите номер в формате +7 (XXX) XXX-XX-XX', { attachments: [CancelKeyboard] });
+        return;
+      }
+      state.data.phone = formatPhone(sanitizedText);
       await setUserState(id, 'question', 'question', state.data);
-      await safeReply(ctx, '❓ Напишите ваш вопрос', { attachments: [CancelKeyboard] });
-      break;
-      
-    case 'question':
-      state.data.question = sanitizedQuestion;
+      await safeReply(ctx, '💬 Напишите ваш вопрос', { attachments: [CancelKeyboard] });
+      return;
+    }
+    
+    if (state.currentStep === 'question') {
+      if (sanitizedText.length < 5) {
+        await safeReply(ctx, '❌ Вопрос слишком короткий. Попробуйте ещё раз.', { attachments: [CancelKeyboard] });
+        return;
+      }
+      state.data.question = sanitizedText;
       await setUserState(id, 'question', 'confirm', state.data);
-      
       await safeReply(ctx, `✅ Проверьте данные:
+
 👤 Имя: ${state.data.name}
 📞 Телефон: ${state.data.phone}
-❓ Вопрос: ${state.data.question}`, { attachments: [ConfirmKeyboard] });
-      break;
+💬 Вопрос: ${state.data.question}`, { attachments: [ConfirmKeyboard] });
+      return;
+    }
   }
-}
-
-// ============== ERROR HANDLING ==============
-
-bot.catch((error: any) => {
-  log('ERROR', 'Bot error:', error);
+  
+  // Если состояние неизвестно - сбрасываем
+  await clearUserState(id);
+  await safeReply(ctx, 'Выберите действие:', { attachments: [MainKeyboard] });
 });
 
 // ============== GRACEFUL SHUTDOWN ==============
@@ -1515,7 +1531,7 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 async function startBot() {
   try {
-    log('INFO', 'Starting bot v11.10...');
+    log('INFO', 'Starting bot v11.11...');
     log('INFO', `ADMIN_ID: ${ADMIN_ID}`);
     log('INFO', `CHANNEL_ID: ${CHANNEL_ID}`);
     
@@ -1526,7 +1542,13 @@ async function startBot() {
       process.exit(1);
     }
     
-    // Быстрое меню УБРАНО - используется только главное меню
+    // Очищаем быстрое меню по / (если было настроено ранее)
+    try {
+      await bot.api.setMyCommands([]);
+      log('INFO', 'Cleared slash commands menu');
+    } catch (e) {
+      log('WARN', 'Could not clear slash commands', e);
+    }
     
     // Запускаем health check server
     startHealthServer();
@@ -1536,14 +1558,14 @@ async function startBot() {
     log('INFO', 'Bot started successfully!');
     
     // Уведомляем админа о запуске
-    await sendNotification(`🤖 Бот v11.10 запущен!
+    await sendNotification(`🤖 Бот v11.11 запущен!
 
 🕐 Время: ${new Date().toISOString()}
 📊 База данных: OK
 
 📝 Изменения:
-• Быстрое меню по / УБРАНО
-• Резюме: исправлено сообщение об ошибке`);
+• Резюме: только ссылка или слово "нет"
+• Очистка быстрого меню по /`);
     
   } catch (error: any) {
     log('ERROR', 'Failed to start bot', error);
