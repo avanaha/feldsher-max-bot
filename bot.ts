@@ -1,13 +1,15 @@
 #!/usr/bin/env bun
 /**
  * MAX Messenger Bot for Feldsher.Ryadom project
- * Version: 11.3
+ * Version: 11.2
  * 
- * Исправления в v11.3:
- * - ИСПРАВЛЕНО: Автоматическая установка DATABASE_URL если не задана
- * - ИСПРАВЛЕНО: Автоматическая миграция БД при запуске (prisma db push)
- * - УЛУЧШЕНО: Логирование ошибок подключения к БД
- * - УЛУЧШЕНО: Graceful shutdown
+ * Исправления в v11.2:
+ * - ИСПРАВЛЕНО: Все тексты сообщений согласно ТЗ
+ * - ИСПРАВЛЕНО: Полный текст согласия на обработку ПД
+ * - ИСПРАВЛЕНО: Новое приветственное сообщение
+ * - ИСПРАВЛЕНО: Тексты всех команд (/order, /doveren, /podderzhka, /privacy, /channels, /revoke)
+ * - ИСПРАВЛЕНО: Кнопки отзыва согласия (Отозвать / Не отзывать)
+ * - СОХРАНЕНО: Все функции безопасности (Rate Limiting, шифрование, бэкапы, ротация логов)
  * 
  * Repository: https://github.com/avanaha/feldsher-max-bot
  */
@@ -17,15 +19,6 @@ import { PrismaClient } from '@prisma/client';
 import { mkdirSync, existsSync, appendFileSync, unlinkSync, readdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
-import { execSync } from 'child_process';
-
-// ============== DATABASE URL - АВТОМАТИЧЕСКАЯ УСТАНОВКА ==============
-// Если DATABASE_URL не задана, используем дефолтный путь
-if (!process.env.DATABASE_URL) {
-  const dbPath = '/app/data/database.sqlite';
-  process.env.DATABASE_URL = `file:${dbPath}`;
-  console.log(`[INFO] DATABASE_URL not set, using default: ${process.env.DATABASE_URL}`);
-}
 
 // ============== CONFIG ==============
 const ADMIN_ID = parseInt(process.env.MAX_ADMIN_ID || '162749713');
@@ -224,66 +217,7 @@ if (!existsSync(dataDir)) {
   }
 }
 
-// ============== АВТОМАТИЧЕСКАЯ МИГРАЦИЯ БД ==============
-function runDatabaseMigration() {
-  try {
-    log('INFO', 'Running database migration...');
-    
-    // Проверяем существует ли файл БД
-    const dbPath = '/app/data/database.sqlite';
-    const dbExists = existsSync(dbPath);
-    log('INFO', `Database file exists: ${dbExists}`);
-    
-    // Запускаем prisma db push
-    log('INFO', 'Executing: bunx prisma db push --skip-generate');
-    const result = execSync('bunx prisma db push --skip-generate --accept-data-loss 2>&1', {
-      encoding: 'utf-8',
-      timeout: 60000,
-      env: { ...process.env }
-    });
-    log('INFO', 'Migration result:', result);
-    log('INFO', 'Database migration completed successfully');
-    return true;
-  } catch (error: any) {
-    log('ERROR', 'Database migration failed', { 
-      message: error.message, 
-      stdout: error.stdout, 
-      stderr: error.stderr 
-    });
-    return false;
-  }
-}
-
-// Запускаем миграцию ДО создания PrismaClient
-const migrationSuccess = runDatabaseMigration();
-if (!migrationSuccess) {
-  log('WARN', 'Migration had issues, but continuing...');
-}
-
-const prisma = new PrismaClient({ 
-  log: ['error', 'warn'],
-  errorFormat: 'pretty'
-});
-
-// Проверяем подключение к БД
-async function checkDatabaseConnection() {
-  try {
-    await prisma.$connect();
-    log('INFO', 'Database connected successfully');
-    
-    // Проверяем что таблицы существуют
-    const userCount = await prisma.maxUser.count();
-    log('INFO', `Database check: ${userCount} users in database`);
-    return true;
-  } catch (error: any) {
-    log('ERROR', 'Database connection failed', { 
-      code: error.code, 
-      message: error.message,
-      meta: error.meta 
-    });
-    return false;
-  }
-}
+const prisma = new PrismaClient({ log: ['error'] });
 
 const BOT_CONFIG = {
   token: process.env.MAX_BOT_TOKEN || '',
@@ -317,23 +251,18 @@ const bot = new Bot(BOT_CONFIG.token);
 // ============== DATABASE FUNCTIONS ==============
 
 async function getOrCreateUser(maxId: number, userData: any) {
-  try {
-    const existing = await prisma.maxUser.findUnique({
-      where: { maxId: maxId.toString() },
-    });
-    if (existing) return existing;
-    return prisma.maxUser.create({
-      data: {
-        maxId: maxId.toString(),
-        username: sanitizeInput(userData.username || '', 100),
-        firstName: sanitizeInput(userData.firstName || '', 100),
-        lastName: sanitizeInput(userData.lastName || '', 100),
-      },
-    });
-  } catch (error: any) {
-    log('ERROR', 'getOrCreateUser failed', { maxId, error: error.message });
-    throw error;
-  }
+  const existing = await prisma.maxUser.findUnique({
+    where: { maxId: maxId.toString() },
+  });
+  if (existing) return existing;
+  return prisma.maxUser.create({
+    data: {
+      maxId: maxId.toString(),
+      username: sanitizeInput(userData.username || '', 100),
+      firstName: sanitizeInput(userData.firstName || '', 100),
+      lastName: sanitizeInput(userData.lastName || '', 100),
+    },
+  });
 }
 
 async function hasUserConsent(maxId: number): Promise<boolean> {
@@ -809,8 +738,7 @@ async function startHealthServer() {
       res.end(JSON.stringify({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '11.3',
-        database: 'connected'
+        version: '11.2'
       }));
     } else {
       res.writeHead(404);
@@ -860,12 +788,7 @@ bot.use(async (ctx, next) => {
     return next();
   }
 
-  try {
-    await getOrCreateUser(id, getUserData(ctx));
-  } catch (e) {
-    log('ERROR', 'Failed to get/create user in consent middleware', e);
-    return;
-  }
+  await getOrCreateUser(id, getUserData(ctx));
 
   const hasConsent = await hasUserConsent(id);
   
@@ -1475,52 +1398,17 @@ async function handleQuestionFlow(ctx: any, id: number, text: string, state: any
 // ============== ERROR HANDLING ==============
 
 bot.catch((error: any) => {
-  log('ERROR', 'Bot error:', { 
-    message: error.message, 
-    code: error.code,
-    stack: error.stack 
-  });
+  log('ERROR', 'Bot error:', error);
 });
-
-// ============== GRACEFUL SHUTDOWN ==============
-
-async function gracefulShutdown(signal: string) {
-  log('INFO', `Received ${signal}, shutting down gracefully...`);
-  
-  try {
-    await prisma.$disconnect();
-    log('INFO', 'Database disconnected');
-  } catch (e) {
-    log('ERROR', 'Error disconnecting database', e);
-  }
-  
-  process.exit(0);
-}
-
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // ============== START BOT ==============
 
 async function startBot() {
   try {
-    log('INFO', `Starting bot v11.3...`);
+    log('INFO', 'Starting bot v11.2...');
     log('INFO', `DATABASE_URL: ${process.env.DATABASE_URL}`);
     log('INFO', `ADMIN_ID: ${ADMIN_ID}`);
     log('INFO', `CHANNEL_ID: ${CHANNEL_ID}`);
-    
-    // Проверяем подключение к БД
-    const dbOk = await checkDatabaseConnection();
-    if (!dbOk) {
-      log('ERROR', 'Database connection failed, retrying migration...');
-      // Пробуем миграцию ещё раз
-      runDatabaseMigration();
-      await new Promise(r => setTimeout(r, 2000));
-      const retryOk = await checkDatabaseConnection();
-      if (!retryOk) {
-        log('ERROR', 'Database still not working, but starting anyway...');
-      }
-    }
     
     // Запускаем health check server
     startHealthServer();
@@ -1530,10 +1418,10 @@ async function startBot() {
     log('INFO', 'Bot started successfully!');
     
     // Уведомляем админа о запуске
-    await sendNotification(`🤖 Бот v11.3 запущен!\n\n🕐 Время: ${new Date().toISOString()}\n📊 База данных: ${dbOk ? 'OK' : 'ПРОБЛЕМА'}`);
+    await sendNotification(`🤖 Бот v11.2 запущен!\n\n🕐 Время: ${new Date().toISOString()}`);
     
   } catch (error: any) {
-    log('ERROR', 'Failed to start bot', { message: error.message, stack: error.stack });
+    log('ERROR', 'Failed to start bot', error);
     process.exit(1);
   }
 }
