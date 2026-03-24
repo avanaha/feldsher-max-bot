@@ -14,8 +14,8 @@ model MaxUser {
   firstName       String?
   lastName        String?
   hasConsent      Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       String?
+  updatedAt       String?
 
   state           MaxUserState?
   waitlistEntries MaxWaitlistEntry[]
@@ -28,9 +28,9 @@ model MaxUserState {
   maxUserId       String   @unique
   currentStep     String
   flowType        String
-  data            String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  data            String?
+  createdAt       String?
+  updatedAt       String?
 
   maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
 }
@@ -41,7 +41,7 @@ model MaxWaitlistEntry {
   name            String
   phone           String
   district        String
-  createdAt       DateTime @default(now())
+  createdAt       String?
 
   maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
 }
@@ -54,7 +54,7 @@ model MaxFeldsherApplication {
   experience      String
   scheduleType    String
   resumeLink      String?
-  createdAt       DateTime @default(now())
+  createdAt       String?
 
   maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
 }
@@ -66,7 +66,7 @@ model MaxQuestion {
   phone           String
   question        String
   isAnswered      Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  createdAt       String?
 
   maxUser         MaxUser @relation(fields: [maxUserId], references: [id], onDelete: Cascade)
 }
