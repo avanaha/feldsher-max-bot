@@ -7,8 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Примечание: Если DATABASE_URL не задана, бот автоматически установит её в file:/app/data/database.sqlite
-
 model MaxUser {
   id              String   @id @default(cuid())
   maxId           String   @unique
